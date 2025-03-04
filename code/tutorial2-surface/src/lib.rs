@@ -16,6 +16,7 @@ struct State<'a> {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
+    clear_color: wgpu::Color,
     // The window must be declared after the surface so
     // it gets dropped after it as the surface contains
     // unsafe references to the window's resources.
@@ -46,6 +47,9 @@ impl<'a> State<'a> {
             })
             .await
             .unwrap();
+
+        let adapter_info = adapter.get_info();
+        log::info!("adapter info: {:?}", adapter_info.name);
 
         let (device, queue) = adapter
             .request_device(
@@ -88,12 +92,15 @@ impl<'a> State<'a> {
             view_formats: vec![],
         };
 
+        let clear_color = wgpu::Color::BLACK;
+
         Self {
             surface,
             device,
             queue,
             config,
             size,
+            clear_color,
             window,
         }
     }
@@ -113,7 +120,17 @@ impl<'a> State<'a> {
 
     #[allow(unused_variables)]
     fn input(&mut self, event: &WindowEvent) -> bool {
-        false
+        match event {
+            WindowEvent::CursorMoved {
+                device_id,
+                position,
+            } => {
+                self.clear_color.r = position.x as f64 / self.size.width as f64;
+                self.clear_color.g = position.y as f64 / self.size.height as f64;
+                true
+            }
+            _ => false,
+        }
     }
 
     fn update(&mut self) {}
@@ -137,12 +154,7 @@ impl<'a> State<'a> {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.2,
-                            b: 0.3,
-                            a: 1.0,
-                        }),
+                        load: wgpu::LoadOp::Clear(self.clear_color),
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -190,7 +202,11 @@ pub async fn run() {
             })
             .expect("Couldn't append canvas to document body.");
 
-        let _ = window.request_inner_size(PhysicalSize::new(450, 400));
+        let win = web_sys::window().expect("No global `window` exists");
+        let width = win.inner_width().unwrap().as_f64().unwrap() as u32;
+        let height = win.inner_height().unwrap().as_f64().unwrap() as u32;
+
+        let _ = window.request_inner_size(PhysicalSize::new(width.min(2048), height.min(2048)));
     }
 
     // State::new uses async code, so we're going to wait for it to finish
