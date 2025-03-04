@@ -1,0 +1,16 @@
+# Blender MTL File: 'Wooden Crate.blend'
+# Material Count: 1
+
+newmtl Material.001
+Ns 225.000000
+Ka 1.000000 1.000000 1.000000
+Kd 0.800000 0.800000 0.800000
+Ks 0.122081 0.122081 0.122081
+Ke 0.0 0.0 0.0
+Ni 1.330000
+d 1.000000
+illum 2
+map_Bump -bm 0.600000  wooden_crate_normal.png
+map_Kd wooden_crate_base_color.png
+map_Ns  wooden_crate_roughness.png
+refl  wooden_crate_metallic.png
