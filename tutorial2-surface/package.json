@@ -1,0 +1,18 @@
+{
+  "name": "tutorial2-surface",
+  "type": "module",
+  "collaborators": [
+    "Ben Hansen <https://github.com/sotrh>"
+  ],
+  "version": "0.1.0",
+  "files": [
+    "wasm-package_bg.wasm",
+    "wasm-package.js",
+    "wasm-package.d.ts"
+  ],
+  "main": "wasm-package.js",
+  "types": "wasm-package.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
