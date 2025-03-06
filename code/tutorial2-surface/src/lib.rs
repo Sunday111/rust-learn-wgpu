@@ -44,14 +44,14 @@ impl<'a> App<'a> {
 
 impl<'a> ApplicationHandler for App<'a> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        self.renderer = Some(
-            Renderer::new(
-                event_loop
-                    .create_window(Window::default_attributes())
-                    .unwrap(),
-            )
-            .block_on(),
-        );
+        let renderer = Renderer::new(
+            event_loop
+                .create_window(Window::default_attributes())
+                .unwrap(),
+        )
+        .block_on();
+
+        self.renderer = Some(renderer);
     }
 
     fn window_event(
@@ -128,8 +128,6 @@ impl<'a> Renderer<'a> {
         {
             // Winit prevents sizing with CSS, so we have to set
             // the size manually when on web.
-            use winit::dpi::PhysicalSize;
-
             use winit::platform::web::WindowExtWebSys;
             web_sys::window()
                 .and_then(|win| win.document())
@@ -140,15 +138,6 @@ impl<'a> Renderer<'a> {
                     Some(())
                 })
                 .expect("Couldn't append canvas to document body.");
-
-            let win = web_sys::window().expect("No global `window` exists");
-            let width = win.inner_width().unwrap().as_f64().unwrap() as u32;
-            let height = win.inner_height().unwrap().as_f64().unwrap() as u32;
-
-            let _ = window_ref.request_inner_size(PhysicalSize::new(
-                width.min(device_limits.max_texture_dimension_2d),
-                height.min(device_limits.max_texture_dimension_2d),
-            ));
         }
 
         let surface_caps = surface.get_capabilities(&adapter);
