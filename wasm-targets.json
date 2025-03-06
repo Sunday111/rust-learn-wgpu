@@ -1,5 +1,8 @@
 [
     {
         "package": "tutorial2-surface"
+    },
+    {
+        "package": "tutorial3-pipeline"
     }
 ]
