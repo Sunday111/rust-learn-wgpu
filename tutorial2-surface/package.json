@@ -1,7 +1,15 @@
 {
   "name": "tutorial2-surface",
   "type": "module",
+  "collaborators": [
+    "Kostiantyn Lazukin"
+  ],
+  "description": "Just a test",
   "version": "0.1.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sunday111/rust-learn-wgpu"
+  },
   "files": [
     "wasm-package_bg.wasm",
     "wasm-package.js",
