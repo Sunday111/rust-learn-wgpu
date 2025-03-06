@@ -1,4 +1,5 @@
 use std::{iter, pin::Pin};
+use web_time::Instant;
 
 use pollster::FutureExt;
 use winit::{
@@ -9,10 +10,16 @@ use winit::{
     window::{Window, WindowId},
 };
 
+mod fps_counter;
+use fps_counter::FpsCounter;
+
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
-struct State<'a> {
+#[cfg(not(target_arch = "wasm32"))]
+use env_logger::Env;
+
+struct Renderer<'a> {
     window: Pin<Box<Window>>,
     surface: wgpu::Surface<'a>,
     device: wgpu::Device,
@@ -21,17 +28,24 @@ struct State<'a> {
     size: winit::dpi::PhysicalSize<u32>,
     clear_color: wgpu::Color,
     surface_configured: bool,
+    frame_counter: FpsCounter,
+    last_printed_fps: Instant,
 }
 
-#[derive(Default)]
 struct App<'a> {
-    state: Option<State<'a>>,
+    renderer: Option<Renderer<'a>>,
+}
+
+impl<'a> App<'a> {
+    fn new() -> Self {
+        Self { renderer: None }
+    }
 }
 
 impl<'a> ApplicationHandler for App<'a> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        self.state = Some(
-            State::new(
+        self.renderer = Some(
+            Renderer::new(
                 event_loop
                     .create_window(Window::default_attributes())
                     .unwrap(),
@@ -46,14 +60,14 @@ impl<'a> ApplicationHandler for App<'a> {
         window_id: WindowId,
         event: WindowEvent,
     ) {
-        match &mut self.state {
+        match &mut self.renderer {
             Some(s) => s.window_event(event_loop, window_id, event),
             _ => {}
         }
     }
 }
 
-impl<'a> State<'a> {
+impl<'a> Renderer<'a> {
     async fn new(w: Window) -> Self {
         // The instance is a handle to our GPU
         // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
@@ -166,6 +180,8 @@ impl<'a> State<'a> {
             size: size,
             clear_color: wgpu::Color::BLACK,
             surface_configured: false,
+            frame_counter: FpsCounter::new(),
+            last_printed_fps: Instant::now(),
         }
     }
 
@@ -237,41 +253,51 @@ impl<'a> State<'a> {
         }
     }
 
-    fn update(&mut self) {}
+    fn update(&mut self) {
+        let now = Instant::now();
+        let since_last_print = now.duration_since(self.last_printed_fps);
+        if since_last_print.as_secs_f32() > 1.0 {
+            log::info!("fps: {}", self.frame_counter.framerate());
+            self.last_printed_fps = now;
+        }
+    }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
-        if self.surface_configured {
-            let output = self.surface.get_current_texture()?;
-            let view = output
-                .texture
-                .create_view(&wgpu::TextureViewDescriptor::default());
-
-            let mut encoder = self
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Render Encoder"),
-                });
-
-            {
-                let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("Render Pass"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(self.clear_color),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: None,
-                    occlusion_query_set: None,
-                    timestamp_writes: None,
-                });
-            }
-
-            self.queue.submit(iter::once(encoder.finish()));
-            output.present();
+        self.frame_counter.register_entry(Instant::now());
+        if !self.surface_configured {
+            return Ok(());
         }
+
+        let output = self.surface.get_current_texture()?;
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Render Encoder"),
+            });
+
+        {
+            let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(self.clear_color),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            });
+        }
+
+        self.queue.submit(iter::once(encoder.finish()));
+        output.present();
         Ok(())
     }
 }
@@ -283,14 +309,17 @@ pub async fn run() {
             std::panic::set_hook(Box::new(console_error_panic_hook::hook));
             console_log::init_with_level(log::Level::Info).expect("Couldn't initialize logger");
         } else {
-            env_logger::init();
+            let env = Env::default()
+                .filter_or("MY_LOG_LEVEL", "info")
+                .write_style_or("MY_LOG_STYLE", "always");
+            env_logger::init_from_env(env);
         }
     }
 
     let event_loop = EventLoop::new().unwrap();
     event_loop.set_control_flow(ControlFlow::Poll);
 
-    let mut app = App::default();
+    let mut app = App::new();
 
     event_loop.run_app(&mut app).unwrap();
 }
