@@ -55,29 +55,6 @@ impl<'a> ApplicationHandler for App<'a> {
 
 impl<'a> State<'a> {
     async fn new(w: Window) -> Self {
-        #[cfg(target_arch = "wasm32")]
-        {
-            // Winit prevents sizing with CSS, so we have to set
-            // the size manually when on web.
-            use winit::dpi::PhysicalSize;
-
-            use winit::platform::web::WindowExtWebSys;
-            web_sys::window()
-                .and_then(|win| win.document())
-                .and_then(|doc| {
-                    let dst = doc.get_element_by_id("wasm-body")?;
-                    let canvas = web_sys::Element::from(w.canvas()?);
-                    dst.append_child(&canvas).ok()?;
-                    Some(())
-                })
-                .expect("Couldn't append canvas to document body.");
-
-            let win = web_sys::window().expect("No global `window` exists");
-            let width = win.inner_width().unwrap().as_f64().unwrap() as u32;
-            let height = win.inner_height().unwrap().as_f64().unwrap() as u32;
-
-            let _ = w.request_inner_size(PhysicalSize::new(width.min(2048), height.min(2048)));
-        }
         // The instance is a handle to our GPU
         // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -113,7 +90,9 @@ impl<'a> State<'a> {
                     // WebGL doesn't support all of wgpu's features, so if
                     // we're building for the web we'll have to disable some.
                     required_limits: if cfg!(target_arch = "wasm32") {
-                        wgpu::Limits::downlevel_webgl2_defaults()
+                        let mut l = wgpu::Limits::downlevel_webgl2_defaults();
+                        l.max_texture_dimension_2d = 4096;
+                        l
                     } else {
                         wgpu::Limits::default()
                     },
@@ -125,8 +104,38 @@ impl<'a> State<'a> {
             .await
             .unwrap();
 
+        let device_limits = device.limits();
+        log::info!("device limits: {:?}", device_limits);
+
         let adapter_info = adapter.get_info();
-        log::info!("adapter info: {:?}", adapter_info.name);
+        log::info!("adapter info: {:?}", adapter_info);
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            // Winit prevents sizing with CSS, so we have to set
+            // the size manually when on web.
+            use winit::dpi::PhysicalSize;
+
+            use winit::platform::web::WindowExtWebSys;
+            web_sys::window()
+                .and_then(|win| win.document())
+                .and_then(|doc| {
+                    let dst = doc.get_element_by_id("wasm-body")?;
+                    let canvas = web_sys::Element::from(window_ref.canvas()?);
+                    dst.append_child(&canvas).ok()?;
+                    Some(())
+                })
+                .expect("Couldn't append canvas to document body.");
+
+            let win = web_sys::window().expect("No global `window` exists");
+            let width = win.inner_width().unwrap().as_f64().unwrap() as u32;
+            let height = win.inner_height().unwrap().as_f64().unwrap() as u32;
+
+            let _ = window_ref.request_inner_size(PhysicalSize::new(
+                width.min(device_limits.max_texture_dimension_2d),
+                height.min(device_limits.max_texture_dimension_2d),
+            ));
+        }
 
         let surface_caps = surface.get_capabilities(&adapter);
         // Shader code in this tutorial assumes an Srgb surface texture. Using a different
