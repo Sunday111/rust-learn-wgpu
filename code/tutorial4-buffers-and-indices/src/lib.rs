@@ -2,6 +2,7 @@ use std::{iter, pin::Pin};
 use web_time::Instant;
 
 use pollster::FutureExt;
+use wgpu::util::DeviceExt;
 use winit::{
     application::ApplicationHandler,
     event::*,
@@ -19,6 +20,43 @@ use wasm_bindgen::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
 use env_logger::Env;
 
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct Vertex {
+    position: [f32; 3],
+    color: [f32; 3],
+}
+
+impl Vertex {
+    const ATTRIBS: [wgpu::VertexAttribute; 2] =
+        wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
+
+    fn layout() -> wgpu::VertexBufferLayout<'static> {
+        use std::mem;
+
+        wgpu::VertexBufferLayout {
+            array_stride: mem::size_of::<Self>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &Self::ATTRIBS,
+        }
+    }
+}
+
+const TRIANGLE_VERTICES: &[Vertex] = &[
+    Vertex {
+        position: [0.0, 0.5, 0.0],
+        color: [1.0, 0.0, 0.0],
+    },
+    Vertex {
+        position: [-0.5, -0.5, 0.0],
+        color: [0.0, 1.0, 0.0],
+    },
+    Vertex {
+        position: [0.5, -0.5, 0.0],
+        color: [0.0, 0.0, 1.0],
+    },
+];
+
 struct Renderer<'a> {
     window: Pin<Box<Window>>,
     surface: wgpu::Surface<'a>,
@@ -31,6 +69,8 @@ struct Renderer<'a> {
     frame_counter: FpsCounter,
     last_printed_fps: Instant,
     render_pipeline: wgpu::RenderPipeline,
+    vertex_buffer: wgpu::Buffer,
+    num_vertices: u32,
 }
 
 struct App<'a> {
@@ -181,7 +221,7 @@ impl<'a> Renderer<'a> {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_main"),
-                buffers: &[],
+                buffers: &[Vertex::layout()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -218,6 +258,12 @@ impl<'a> Renderer<'a> {
             cache: None,
         });
 
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Vertex Buffer"),
+            contents: bytemuck::cast_slice(TRIANGLE_VERTICES),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+
         Self {
             window: window_box,
             surface: surface,
@@ -230,6 +276,8 @@ impl<'a> Renderer<'a> {
             frame_counter: FpsCounter::new(),
             last_printed_fps: Instant::now(),
             render_pipeline: render_pipeline,
+            vertex_buffer: vertex_buffer,
+            num_vertices: TRIANGLE_VERTICES.len() as u32,
         }
     }
 
@@ -352,7 +400,8 @@ impl<'a> Renderer<'a> {
             });
 
             render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.draw(0..4, 0..2);
+            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            render_pass.draw(0..self.num_vertices, 0..1);
         }
 
         self.queue.submit(iter::once(encoder.finish()));
