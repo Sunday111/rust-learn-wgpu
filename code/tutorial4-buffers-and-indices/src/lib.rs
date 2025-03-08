@@ -57,6 +57,33 @@ const TRIANGLE_VERTICES: &[Vertex] = &[
     },
 ];
 
+const TRIANGLE_INDICES: &[u16] = &[0, 1, 2];
+
+const HEX_VERTICES: &[Vertex] = &[
+    Vertex {
+        position: [-0.0868241, 0.49240386, 0.0],
+        color: [0.5, 0.0, 0.5],
+    },
+    Vertex {
+        position: [-0.49513406, 0.06958647, 0.0],
+        color: [0.5, 0.0, 0.5],
+    },
+    Vertex {
+        position: [-0.21918549, -0.44939706, 0.0],
+        color: [0.5, 0.0, 0.5],
+    },
+    Vertex {
+        position: [0.35966998, -0.3473291, 0.0],
+        color: [0.5, 0.0, 0.5],
+    },
+    Vertex {
+        position: [0.44147372, 0.2347359, 0.0],
+        color: [0.5, 0.0, 0.5],
+    },
+];
+
+const HEX_INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4];
+
 struct Renderer<'a> {
     window: Pin<Box<Window>>,
     surface: wgpu::Surface<'a>,
@@ -70,7 +97,8 @@ struct Renderer<'a> {
     last_printed_fps: Instant,
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
-    num_vertices: u32,
+    index_buffer: wgpu::Buffer,
+    num_indices: u32,
 }
 
 struct App<'a> {
@@ -264,6 +292,12 @@ impl<'a> Renderer<'a> {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
+        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Index Buffer"),
+            contents: bytemuck::cast_slice(TRIANGLE_INDICES),
+            usage: wgpu::BufferUsages::INDEX,
+        });
+
         Self {
             window: window_box,
             surface: surface,
@@ -277,8 +311,37 @@ impl<'a> Renderer<'a> {
             last_printed_fps: Instant::now(),
             render_pipeline: render_pipeline,
             vertex_buffer: vertex_buffer,
-            num_vertices: TRIANGLE_VERTICES.len() as u32,
+            index_buffer: index_buffer,
+            num_indices: TRIANGLE_INDICES.len() as u32,
         }
+    }
+
+    fn swap_model(&mut self) {
+        let (vertices, indices) = {
+            if self.num_indices == TRIANGLE_INDICES.len() as u32 {
+                (HEX_VERTICES, HEX_INDICES)
+            } else {
+                (TRIANGLE_VERTICES, TRIANGLE_INDICES)
+            }
+        };
+
+        self.vertex_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Vertex Buffer"),
+                contents: bytemuck::cast_slice(vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+
+        self.index_buffer = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Index Buffer"),
+                contents: bytemuck::cast_slice(indices),
+                usage: wgpu::BufferUsages::INDEX,
+            });
+
+        self.num_indices = indices.len() as u32;
     }
 
     #[allow(unused_variables)]
@@ -335,6 +398,20 @@ impl<'a> Renderer<'a> {
             } => {
                 self.clear_color.r = position.x as f64 / self.size.width as f64;
                 self.clear_color.g = position.y as f64 / self.size.height as f64;
+            }
+            WindowEvent::MouseInput {
+                device_id,
+                state,
+                button,
+            } => {
+                if button == MouseButton::Left && state == ElementState::Pressed {
+                    self.swap_model();
+                }
+            }
+            WindowEvent::Touch(touch) => {
+                if touch.phase == TouchPhase::Started {
+                    self.swap_model();
+                }
             }
             _ => {}
         }
@@ -401,7 +478,8 @@ impl<'a> Renderer<'a> {
 
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            render_pass.draw(0..self.num_vertices, 0..1);
+            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
         }
 
         self.queue.submit(iter::once(encoder.finish()));
