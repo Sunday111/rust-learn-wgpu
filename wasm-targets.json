@@ -4,5 +4,8 @@
     },
     {
         "package": "tutorial3-pipeline"
+    },
+    {
+        "package": "tutorial4-buffers-and-indices"
     }
 ]
