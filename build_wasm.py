@@ -23,9 +23,15 @@ def main():
                 '--out-dir',
                 out_dir,
                 '--out-name',
-                'wasm-package'
+                'wasm-package',
+                '--no-typescript', # to not generate ts files
+                '--no-pack', # do not generate package.json
             ])
             shutil.copyfile(ROOT_DIR / 'index.html', out_dir / 'index.html')
+
+            gitignore = out_dir / '.gitignore'
+            gitignore.unlink() # whole build dir is already ignored
+
 
 if __name__ == '__main__':
     main()
