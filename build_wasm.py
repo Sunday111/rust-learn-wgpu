@@ -8,15 +8,16 @@ WASM_BUILD_ROOT=ROOT_DIR / 'wasm-build'
 
 def main():
     shutil.rmtree(WASM_BUILD_ROOT, ignore_errors=True)
-    with open(file=ROOT_DIR / 'wasm-targets.json', mode='r', encoding='utf-8') as file:
-        for entry in json.load(file):
-            package = entry['package']
-            out_dir = WASM_BUILD_ROOT / package
+    code_dir = ROOT_DIR / 'code'
+    for path in code_dir.glob('*'):
+        if path.is_dir():
+            rel_path = path.relative_to(code_dir)
+            out_dir = WASM_BUILD_ROOT / rel_path
 
             subprocess.check_call([
                 'wasm-pack',
                 'build',
-                ROOT_DIR / 'code' / package,
+                path,
                 '--target',
                 'web',
                 '--out-dir',
