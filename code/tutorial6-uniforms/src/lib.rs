@@ -598,7 +598,8 @@ impl<'a> Renderer<'a> {
             self.size = new_size;
             self.config.width = new_size.width;
             self.config.height = new_size.height;
-            self.surface.configure(&self.device, &self.config)
+            self.surface.configure(&self.device, &self.config);
+            self.camera.aspect = new_size.width as f32 / new_size.height as f32;
         }
     }
 
