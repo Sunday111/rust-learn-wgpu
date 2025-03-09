@@ -49,17 +49,17 @@ const TRIANGLE_VERTICES: &[Vertex] = &[
     Vertex {
         position: [0.0, 0.5, 0.0],
         color: [1.0, 0.0, 0.0],
-        tex_coords: [0.5, 0.75],
+        tex_coords: [0.5, 0.0],
     },
     Vertex {
         position: [-0.5, -0.5, 0.0],
         color: [0.0, 1.0, 0.0],
-        tex_coords: [0.25, 0.25],
+        tex_coords: [0.0, 1.0],
     },
     Vertex {
         position: [0.5, -0.5, 0.0],
         color: [0.0, 0.0, 1.0],
-        tex_coords: [0.75, 0.25],
+        tex_coords: [1.0, 1.0],
     },
 ];
 
@@ -95,7 +95,12 @@ const HEX_VERTICES: &[Vertex] = &[
 
 const HEX_INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4];
 
+struct TextureState {
+    bind_group: wgpu::BindGroup,
+}
+
 struct Renderer<'a> {
+    start_time: Instant,
     window: Pin<Box<Window>>,
     surface: wgpu::Surface<'a>,
     device: wgpu::Device,
@@ -110,10 +115,8 @@ struct Renderer<'a> {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     num_indices: u32,
-    diffuse_bind_group: wgpu::BindGroup,
-
-    #[allow(unused)]
-    diffuse_texture: texture::Texture,
+    textures: [TextureState; 2],
+    active_texture: u32,
 }
 
 struct App<'a> {
@@ -235,17 +238,35 @@ impl<'a> Renderer<'a> {
             .find(|f| f.is_srgb())
             .unwrap_or(surface_caps.formats[0]);
 
-        let diffuse_bytes = include_bytes!("happy-tree.png");
-        let diffuse_texture =
-            texture::Texture::from_bytes(&device, &queue, diffuse_bytes, "happy-tree.png").unwrap();
-
-        let (diffuse_bind_group_layout, diffuse_bind_group) =
-            Renderer::make_texture_bind_group(&device, &diffuse_texture);
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        // This should match the filterable field of the
+                        // corresponding Texture entry above.
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+                label: Some("texture_bind_group_layout"),
+            });
 
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[&diffuse_bind_group_layout],
+                bind_group_layouts: &[&texture_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -320,7 +341,73 @@ impl<'a> Renderer<'a> {
             usage: wgpu::BufferUsages::INDEX,
         });
 
+        let textures = {
+            [
+                {
+                    let diffuse_bytes = include_bytes!("happy-tree.png");
+                    let diffuse_texture = texture::Texture::from_bytes(
+                        &device,
+                        &queue,
+                        diffuse_bytes,
+                        "happy-tree.png",
+                    )
+                    .unwrap();
+                    TextureState {
+                        bind_group: device.create_bind_group(&wgpu::BindGroupDescriptor {
+                            layout: &texture_bind_group_layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: wgpu::BindingResource::TextureView(
+                                        &diffuse_texture.view,
+                                    ),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: wgpu::BindingResource::Sampler(
+                                        &diffuse_texture.sampler,
+                                    ),
+                                },
+                            ],
+                            label: Some("happy tree bind group"),
+                        }),
+                    }
+                },
+                {
+                    let diffuse_bytes = include_bytes!("illuminati.png");
+                    let diffuse_texture = texture::Texture::from_bytes(
+                        &device,
+                        &queue,
+                        diffuse_bytes,
+                        "illuminati.png",
+                    )
+                    .unwrap();
+                    TextureState {
+                        bind_group: device.create_bind_group(&wgpu::BindGroupDescriptor {
+                            layout: &texture_bind_group_layout,
+                            entries: &[
+                                wgpu::BindGroupEntry {
+                                    binding: 0,
+                                    resource: wgpu::BindingResource::TextureView(
+                                        &diffuse_texture.view,
+                                    ),
+                                },
+                                wgpu::BindGroupEntry {
+                                    binding: 1,
+                                    resource: wgpu::BindingResource::Sampler(
+                                        &diffuse_texture.sampler,
+                                    ),
+                                },
+                            ],
+                            label: Some("illuminati bind group"),
+                        }),
+                    }
+                },
+            ]
+        };
+
         Self {
+            start_time: Instant::now(),
             window: window_box,
             surface: surface,
             device: device,
@@ -335,56 +422,9 @@ impl<'a> Renderer<'a> {
             vertex_buffer: vertex_buffer,
             index_buffer: index_buffer,
             num_indices: TRIANGLE_INDICES.len() as u32,
-            diffuse_bind_group: diffuse_bind_group,
-            diffuse_texture: diffuse_texture,
+            textures: textures,
+            active_texture: 0,
         }
-    }
-
-    fn make_texture_bind_group(
-        device: &wgpu::Device,
-        texture: &texture::Texture,
-    ) -> (wgpu::BindGroupLayout, wgpu::BindGroup) {
-        let texture_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        // This should match the filterable field of the
-                        // corresponding Texture entry above.
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-                label: Some("texture_bind_group_layout"),
-            });
-
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &texture_bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&texture.sampler),
-                },
-            ],
-            label: Some("diffuse_bind_group"),
-        });
-
-        (texture_bind_group_layout, bind_group)
     }
 
     fn swap_model(&mut self) {
@@ -504,6 +544,10 @@ impl<'a> Renderer<'a> {
             log::info!("fps: {}", self.frame_counter.framerate());
             self.last_printed_fps = now;
         }
+
+        let dur_since_start = now.duration_since(self.start_time);
+        self.active_texture =
+            (((dur_since_start.as_secs_f64() / 3.0) as u32) % (self.textures.len() as u32)) as u32;
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -548,7 +592,11 @@ impl<'a> Renderer<'a> {
             });
 
             render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
+            render_pass.set_bind_group(
+                0,
+                &self.textures[self.active_texture as usize].bind_group,
+                &[],
+            );
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
