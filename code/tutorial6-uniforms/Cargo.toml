@@ -1,0 +1,44 @@
+[package]
+name = "tutorial6-uniforms"
+version = "0.1.0"
+edition = "2024"
+authors = ["Kostiantyn Lazukin"]
+description = "Just a test"
+repository = "https://github.com/Sunday111/rust-learn-wgpu"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+cfg-if = "1"
+winit = { version = "0.30", features = ["rwh_06"] }
+env_logger = "0.11"
+log = "0.4"
+wgpu = "24.0"
+pollster = "0.4"
+web-time = "1.1"
+bytemuck = "1.22"
+anyhow = "1.0"
+cgmath = "0.18"
+
+[dependencies.image]
+version = "0.25"
+default-features = false
+features = ["png", "jpeg"]
+
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+console_error_panic_hook = "0.1.7"
+console_log = "1.0"
+wgpu = { version = "24.0", features = ["webgl"]}
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = [
+    "Document",
+    "Window",
+    "Element",
+]}
+
+[[bin]]
+name = "tutorial6-uniforms"
+path = "src/main.rs"
