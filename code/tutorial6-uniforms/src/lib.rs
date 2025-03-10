@@ -1,3 +1,4 @@
+use cgmath::Deg;
 use std::{iter, pin::Pin};
 use web_time::Instant;
 
@@ -11,14 +12,17 @@ use winit::{
     window::{Window, WindowId},
 };
 
+mod almost_equal;
 mod camera;
 mod camera_controller;
 mod fps_counter;
+mod rotator;
 mod texture;
 
 use camera::{Camera, CameraUniform};
 use camera_controller::CameraController;
 use fps_counter::FpsCounter;
+use rotator::Rotator;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -298,19 +302,21 @@ impl<'a> Renderer<'a> {
             view_formats: vec![],
         };
 
-        let camera = camera::Camera {
+        let camera = camera::Camera::new(
             // position the camera 1 unit up and 2 units back
             // +z is out of the screen
-            eye: (0.0, 1.0, 2.0).into(),
+            (0.0, 0.0, 2.0).into(),
             // have it look at the origin
-            target: (0.0, 0.0, 0.0).into(),
-            // which way is "up"
-            up: cgmath::Vector3::unit_y(),
-            aspect: config.width as f32 / config.height as f32,
-            fovy: 45.0,
-            znear: 0.1,
-            zfar: 100.0,
-        };
+            Rotator {
+                yaw: Deg(90.0),
+                pitch: Deg(90.0),
+                roll: Deg(0.0),
+            },
+            config.width as f32 / config.height as f32,
+            90.0,
+            0.1,
+            100.0,
+        );
 
         let mut camera_uniform = camera::CameraUniform::new();
         camera_uniform.update_view_proj(&camera);
@@ -599,7 +605,8 @@ impl<'a> Renderer<'a> {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
-            self.camera.aspect = new_size.width as f32 / new_size.height as f32;
+            self.camera
+                .set_aspect(new_size.width as f32 / new_size.height as f32);
         }
     }
 
