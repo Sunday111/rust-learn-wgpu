@@ -1,22 +1,7 @@
-use cgmath::Deg;
-use std::cell::Ref;
-use std::cell::RefCell;
-
-use cgmath::Matrix4;
-use cgmath::Point3;
-use cgmath::Rad;
-use cgmath::Transform;
-use cgmath::Vector3;
+use cgmath::{Matrix4, Point3, Transform, Vector3};
+use std::cell::{Ref, RefCell};
 
 use crate::Rotator;
-
-#[rustfmt::skip]
-pub const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::new(
-    1.0, 0.0, 0.0, 0.0,
-    0.0, 1.0, 0.0, 0.0,
-    0.0, 0.0, 0.5, 0.5,
-    0.0, 0.0, 0.0, 1.0,
-);
 
 struct CameraCache {
     forward: Vector3<f32>,
@@ -162,6 +147,7 @@ impl CameraUniform {
 mod tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
+    use cgmath::Deg;
 
     #[test]
     fn test_add() {

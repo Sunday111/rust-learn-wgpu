@@ -12,9 +12,9 @@ use winit::{
     window::{Window, WindowId},
 };
 
-mod almost_equal;
 mod camera;
 mod camera_controller;
+mod common;
 mod fps_counter;
 mod rotator;
 mod texture;

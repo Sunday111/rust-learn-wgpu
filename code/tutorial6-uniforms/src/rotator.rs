@@ -1,5 +1,5 @@
+use cgmath::Matrix4;
 use cgmath::{Deg, Rad};
-use cgmath::{Matrix, Matrix4};
 
 pub struct Rotator {
     pub yaw: Deg<f32>,
@@ -42,8 +42,8 @@ impl Rotator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::almost_equal::*;
-    use cgmath::{Point3, Transform, Vector3};
+    use crate::common::test_utils::*;
+    use cgmath::{Transform, Vector3};
 
     #[test]
     fn test_zero_rotator() {
