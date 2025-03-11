@@ -12,20 +12,7 @@ use winit::{
     window::{Window, WindowId},
 };
 
-mod camera;
-mod camera_controller;
-mod common;
-mod fps_counter;
-mod rotator;
-mod texture;
-
-use camera::{Camera, CameraUniform};
-use camera_controller::CameraController;
-use fps_counter::FpsCounter;
-use rotator::Rotator;
-
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
+use klgl::{Camera, CameraController, CameraUniform, Rotator};
 
 #[cfg(not(target_arch = "wasm32"))]
 use env_logger::Env;
@@ -117,7 +104,7 @@ struct Renderer<'a> {
     size: winit::dpi::PhysicalSize<u32>,
     clear_color: wgpu::Color,
     surface_configured: bool,
-    frame_counter: FpsCounter,
+    frame_counter: klgl::FpsCounter,
     last_printed_fps: Instant,
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
@@ -302,7 +289,7 @@ impl<'a> Renderer<'a> {
             view_formats: vec![],
         };
 
-        let camera = camera::Camera::new(
+        let camera = Camera::new(
             // position the camera 1 unit up and 2 units back
             // +z is out of the screen
             (0.0, 0.0, 2.0).into(),
@@ -318,7 +305,7 @@ impl<'a> Renderer<'a> {
             100.0,
         );
 
-        let mut camera_uniform = camera::CameraUniform::new();
+        let mut camera_uniform = CameraUniform::new();
         camera_uniform.update_view_proj(&camera);
 
         let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -345,7 +332,7 @@ impl<'a> Renderer<'a> {
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(tutorial_content::TUTORIAL_6_SHADER.into()),
         });
 
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -406,11 +393,10 @@ impl<'a> Renderer<'a> {
         let textures = {
             [
                 {
-                    let diffuse_bytes = include_bytes!("../../../content/happy-tree.png");
-                    let diffuse_texture = texture::Texture::from_bytes(
+                    let diffuse_texture = klgl::Texture::from_bytes(
                         &device,
                         &queue,
-                        diffuse_bytes,
+                        tutorial_content::HAPPY_TREE_PNG,
                         "happy-tree.png",
                     )
                     .unwrap();
@@ -436,11 +422,10 @@ impl<'a> Renderer<'a> {
                     }
                 },
                 {
-                    let diffuse_bytes = include_bytes!("../../../content/illuminati.png");
-                    let diffuse_texture = texture::Texture::from_bytes(
+                    let diffuse_texture = klgl::Texture::from_bytes(
                         &device,
                         &queue,
-                        diffuse_bytes,
+                        tutorial_content::ILLUMINATI_PNG,
                         "illuminati.png",
                     )
                     .unwrap();
@@ -478,7 +463,7 @@ impl<'a> Renderer<'a> {
             size,
             clear_color: wgpu::Color::BLACK,
             surface_configured: false,
-            frame_counter: FpsCounter::new(),
+            frame_counter: klgl::FpsCounter::new(),
             last_printed_fps: Instant::now(),
             render_pipeline,
             vertex_buffer,

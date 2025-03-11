@@ -803,6 +803,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 
 [[package]]
+name = "klgl"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "cfg-if",
+ "cgmath",
+ "console_error_panic_hook",
+ "console_log",
+ "env_logger",
+ "image",
+ "log",
+ "num-traits",
+ "pollster",
+ "web-sys",
+ "web-time",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.170"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1773,6 +1794,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 
 [[package]]
+name = "tutorial-content"
+version = "0.1.0"
+dependencies = [
+ "image",
+]
+
+[[package]]
 name = "tutorial2-surface"
 version = "0.1.0"
 dependencies = [
@@ -1780,10 +1808,10 @@ dependencies = [
  "console_error_panic_hook",
  "console_log",
  "env_logger",
+ "klgl",
  "log",
  "pollster",
- "wasm-bindgen",
- "wasm-bindgen-futures",
+ "tutorial-content",
  "web-sys",
  "web-time",
  "wgpu",
@@ -1798,10 +1826,10 @@ dependencies = [
  "console_error_panic_hook",
  "console_log",
  "env_logger",
+ "klgl",
  "log",
  "pollster",
- "wasm-bindgen",
- "wasm-bindgen-futures",
+ "tutorial-content",
  "web-sys",
  "web-time",
  "wgpu",
@@ -1817,10 +1845,10 @@ dependencies = [
  "console_error_panic_hook",
  "console_log",
  "env_logger",
+ "klgl",
  "log",
  "pollster",
- "wasm-bindgen",
- "wasm-bindgen-futures",
+ "tutorial-content",
  "web-sys",
  "web-time",
  "wgpu",
@@ -1837,11 +1865,10 @@ dependencies = [
  "console_error_panic_hook",
  "console_log",
  "env_logger",
- "image",
+ "klgl",
  "log",
  "pollster",
- "wasm-bindgen",
- "wasm-bindgen-futures",
+ "tutorial-content",
  "web-sys",
  "web-time",
  "wgpu",
@@ -1859,12 +1886,10 @@ dependencies = [
  "console_error_panic_hook",
  "console_log",
  "env_logger",
- "image",
+ "klgl",
  "log",
- "num-traits",
  "pollster",
- "wasm-bindgen",
- "wasm-bindgen-futures",
+ "tutorial-content",
  "web-sys",
  "web-time",
  "wgpu",

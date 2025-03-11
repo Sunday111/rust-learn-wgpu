@@ -10,9 +10,6 @@ use winit::{
     window::{Window, WindowId},
 };
 
-mod fps_counter;
-use fps_counter::FpsCounter;
-
 #[cfg(not(target_arch = "wasm32"))]
 use env_logger::Env;
 
@@ -25,7 +22,7 @@ struct Renderer<'a> {
     size: winit::dpi::PhysicalSize<u32>,
     clear_color: wgpu::Color,
     surface_configured: bool,
-    frame_counter: FpsCounter,
+    frame_counter: klgl::FpsCounter,
     last_printed_fps: Instant,
 }
 
@@ -166,7 +163,7 @@ impl<'a> Renderer<'a> {
             size: size,
             clear_color: wgpu::Color::BLACK,
             surface_configured: false,
-            frame_counter: FpsCounter::new(),
+            frame_counter: klgl::FpsCounter::new(),
             last_printed_fps: Instant::now(),
         }
     }

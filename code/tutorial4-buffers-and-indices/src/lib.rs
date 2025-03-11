@@ -11,9 +11,6 @@ use winit::{
     window::{Window, WindowId},
 };
 
-mod fps_counter;
-use fps_counter::FpsCounter;
-
 #[cfg(not(target_arch = "wasm32"))]
 use env_logger::Env;
 
@@ -90,7 +87,7 @@ struct Renderer<'a> {
     size: winit::dpi::PhysicalSize<u32>,
     clear_color: wgpu::Color,
     surface_configured: bool,
-    frame_counter: FpsCounter,
+    frame_counter: klgl::FpsCounter,
     last_printed_fps: Instant,
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
@@ -226,7 +223,7 @@ impl<'a> Renderer<'a> {
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(tutorial_content::TUTORIAL_4_SHADER.into()),
         });
 
         let config = wgpu::SurfaceConfiguration {
@@ -304,7 +301,7 @@ impl<'a> Renderer<'a> {
             size: size,
             clear_color: wgpu::Color::BLACK,
             surface_configured: false,
-            frame_counter: FpsCounter::new(),
+            frame_counter: klgl::FpsCounter::new(),
             last_printed_fps: Instant::now(),
             render_pipeline: render_pipeline,
             vertex_buffer: vertex_buffer,

@@ -1,0 +1,15 @@
+[package]
+name = "tutorial-content"
+version = "0.1.0"
+edition = "2024"
+authors = ["Kostiantyn Lazukin"]
+description = "Package that shares in-source content across tutorial modules"
+repository = "https://github.com/Sunday111/rust-learn-wgpu"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies.image]
+version = "0.25"
+default-features = false
+features = ["png", "jpeg"]

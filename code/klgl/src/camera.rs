@@ -1,7 +1,7 @@
 use cgmath::{Matrix4, Point3, Transform, Vector3};
 use std::cell::{Ref, RefCell};
 
-use crate::Rotator;
+use crate::rotator::Rotator;
 
 struct CameraCache {
     forward: Vector3<f32>,

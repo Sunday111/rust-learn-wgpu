@@ -1,4 +1,4 @@
-use crate::Camera;
+use crate::camera::Camera;
 use winit::event::MouseButton;
 
 pub struct CameraController {

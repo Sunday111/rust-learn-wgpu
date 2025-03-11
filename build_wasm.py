@@ -1,6 +1,5 @@
 from pathlib import Path
 import subprocess
-import json
 import shutil
 
 ROOT_DIR = Path(__file__).parent.resolve()
