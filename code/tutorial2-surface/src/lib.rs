@@ -13,9 +13,6 @@ use winit::{
 mod fps_counter;
 use fps_counter::FpsCounter;
 
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
-
 #[cfg(not(target_arch = "wasm32"))]
 use env_logger::Env;
 
@@ -291,7 +288,6 @@ impl<'a> Renderer<'a> {
     }
 }
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen(start))]
 pub async fn run() {
     cfg_if::cfg_if! {
         if #[cfg(target_arch = "wasm32")] {

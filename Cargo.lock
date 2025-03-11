@@ -1995,6 +1995,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasm-target"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "cfg-if",
+ "cgmath",
+ "console_error_panic_hook",
+ "console_log",
+ "env_logger",
+ "image",
+ "log",
+ "num-traits",
+ "pollster",
+ "tutorial2-surface",
+ "tutorial3-pipeline",
+ "tutorial4-buffers-and-indices",
+ "tutorial5-textures",
+ "tutorial6-uniforms",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "web-time",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
 name = "wayland-backend"
 version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"

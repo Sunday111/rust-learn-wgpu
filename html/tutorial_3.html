@@ -34,10 +34,8 @@ canvas {
 
 <body id="wasm-body">
   <script type="module">
-      import init from "./wasm-package.js";
-      init().then(() => {
-          console.log("WASM Loaded");
-      });
+      import init, { run_tutorial_3 } from "./wasm-package.js";
+      init().then(run_tutorial_3);
   </script>
 </body>
 
