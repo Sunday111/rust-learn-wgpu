@@ -24,7 +24,7 @@ def build_wasm_target(src_path:Path, out_dir:Path):
 def main():
     shutil.rmtree(WASM_BUILD_ROOT, ignore_errors=True)
     build_wasm_target(ROOT_DIR / 'code/wasm-target', WASM_BUILD_ROOT)
-    for html_path in (ROOT_DIR / 'html').rglob('*.html'):
+    for html_path in (ROOT_DIR / 'html').glob('*'):
         shutil.copyfile(html_path, WASM_BUILD_ROOT / html_path.name)
 
 
