@@ -7,7 +7,6 @@ struct CameraCache {
     forward: Vector3<f32>,
     up: Vector3<f32>,
     right: Vector3<f32>,
-    rotator_matrix: Matrix4<f32>,
     view_matrix: Matrix4<f32>,
 }
 
@@ -63,7 +62,6 @@ impl Camera {
             forward,
             up,
             right,
-            rotator_matrix: r,
             view_matrix: view,
         }
     }

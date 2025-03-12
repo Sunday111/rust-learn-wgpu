@@ -31,16 +31,11 @@ impl CameraController {
         }
     }
 
-    pub fn process_events(
-        &mut self,
-        window: &winit::window::Window,
-        event: &winit::event::WindowEvent,
-    ) -> bool {
+    pub fn process_events(&mut self, event: &winit::event::WindowEvent) -> bool {
         use winit::event::{ElementState, KeyEvent, TouchPhase, WindowEvent};
         use winit::keyboard::{KeyCode, PhysicalKey};
 
         match event {
-            WindowEvent::Focused(focused) => false,
             WindowEvent::Touch(touch) => {
                 match touch.phase {
                     TouchPhase::Started => {
@@ -62,7 +57,7 @@ impl CameraController {
                 true
             }
             WindowEvent::CursorMoved {
-                device_id,
+                device_id: _,
                 position,
             } => {
                 self.prev_cursor = self.current_cursor;
@@ -70,7 +65,7 @@ impl CameraController {
                 false
             }
             WindowEvent::MouseInput {
-                device_id,
+                device_id: _,
                 state,
                 button,
             } => {

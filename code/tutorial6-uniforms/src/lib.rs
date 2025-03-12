@@ -605,7 +605,7 @@ impl<'a> Renderer<'a> {
 
     #[allow(unused_variables)]
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
-        if self.camera_controller.process_events(&self.window, &event) {
+        if self.camera_controller.process_events(&event) {
             return;
         }
 
