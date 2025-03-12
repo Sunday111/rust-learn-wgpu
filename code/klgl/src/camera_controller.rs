@@ -36,7 +36,7 @@ impl CameraController {
         window: &winit::window::Window,
         event: &winit::event::WindowEvent,
     ) -> bool {
-        use winit::event::{ElementState, KeyEvent, WindowEvent};
+        use winit::event::{ElementState, KeyEvent, TouchPhase, WindowEvent};
         use winit::keyboard::{KeyCode, PhysicalKey};
 
         match event {
@@ -48,6 +48,24 @@ impl CameraController {
                 self.prev_cursor = self.current_cursor;
                 self.current_cursor = Some(Vector2::new(position.x as f32, position.y as f32));
                 false
+            }
+            WindowEvent::Touch(touch) => {
+                match touch.phase {
+                    TouchPhase::Started => {
+                        self.rmb = true;
+                    }
+                    TouchPhase::Ended | TouchPhase::Cancelled => {
+                        self.rmb = false;
+                    }
+                    TouchPhase::Moved => {
+                        self.prev_cursor = self.current_cursor;
+                        self.current_cursor = Some(Vector2::new(
+                            touch.location.x as f32,
+                            touch.location.y as f32,
+                        ));
+                    }
+                }
+                true
             }
             WindowEvent::MouseInput {
                 device_id,
