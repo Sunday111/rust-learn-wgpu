@@ -1,4 +1,4 @@
-use cgmath::{Deg, Transform};
+use cgmath::{Deg, Transform, Vector3};
 use std::{iter, pin::Pin};
 use web_time::Instant;
 
@@ -12,46 +12,29 @@ use winit::{
     window::{Window, WindowId},
 };
 
+mod model_vertex;
+use model_vertex::ModelVertex;
+
+mod line_vertex;
+use line_vertex::LineVertex;
+
 use klgl::{Camera, CameraController, CameraUniform, Rotator};
 
 #[cfg(not(target_arch = "wasm32"))]
 use env_logger::Env;
 
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct Vertex {
-    position: [f32; 3],
-    color: [f32; 3],
-    tex_coords: [f32; 2],
-}
-
-impl Vertex {
-    const ATTRIBS: [wgpu::VertexAttribute; 3] =
-        wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2];
-
-    fn layout() -> wgpu::VertexBufferLayout<'static> {
-        use std::mem;
-
-        wgpu::VertexBufferLayout {
-            array_stride: mem::size_of::<Self>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &Self::ATTRIBS,
-        }
-    }
-}
-
-const TRIANGLE_VERTICES: [Vertex; 3] = [
-    Vertex {
+const TRIANGLE_VERTICES: [ModelVertex; 3] = [
+    ModelVertex {
         position: [0.0, 0.5, 0.0],
         color: [1.0, 0.0, 0.0],
         tex_coords: [0.5, 0.0],
     },
-    Vertex {
+    ModelVertex {
         position: [-0.5, -0.5, 0.0],
         color: [0.0, 1.0, 0.0],
         tex_coords: [0.0, 1.0],
     },
-    Vertex {
+    ModelVertex {
         position: [0.5, -0.5, 0.0],
         color: [0.0, 0.0, 1.0],
         tex_coords: [1.0, 1.0],
@@ -60,28 +43,28 @@ const TRIANGLE_VERTICES: [Vertex; 3] = [
 
 const TRIANGLE_INDICES: &[u16] = &[0, 1, 2];
 
-const HEX_VERTICES: [Vertex; 5] = [
-    Vertex {
+const HEX_VERTICES: [ModelVertex; 5] = [
+    ModelVertex {
         position: [-0.0868241, 0.49240386, 0.0],
         color: [1.0; 3],
         tex_coords: [0.4131759, 0.99240386],
     }, // A
-    Vertex {
+    ModelVertex {
         position: [-0.49513406, 0.06958647, 0.0],
         color: [1.0; 3],
         tex_coords: [0.0048659444, 0.56958647],
     }, // B
-    Vertex {
+    ModelVertex {
         position: [-0.21918549, -0.44939706, 0.0],
         color: [1.0; 3],
         tex_coords: [0.28081453, 0.05060294],
     }, // C
-    Vertex {
+    ModelVertex {
         position: [0.35966998, -0.3473291, 0.0],
         color: [1.0; 3],
         tex_coords: [0.85967, 0.1526709],
     }, // D
-    Vertex {
+    ModelVertex {
         position: [0.44147372, 0.2347359, 0.0],
         color: [1.0; 3],
         tex_coords: [0.9414737, 0.7347359],
@@ -106,10 +89,15 @@ struct Renderer<'a> {
     surface_configured: bool,
     frame_counter: klgl::FpsCounter,
     last_printed_fps: Instant,
-    render_pipeline: wgpu::RenderPipeline,
-    vertex_buffer: wgpu::Buffer,
-    index_buffer: wgpu::Buffer,
-    num_indices: u32,
+
+    lines_pipeline: wgpu::RenderPipeline,
+    lines_vertex_buffer: wgpu::Buffer,
+    num_lines: u32,
+
+    models_pipeline: wgpu::RenderPipeline,
+    model_vertex_buffer: wgpu::Buffer,
+    model_index_buffer: wgpu::Buffer,
+    num_model_indices: u32,
     textures: [TextureState; 2],
     active_texture: u32,
     camera: Camera,
@@ -154,7 +142,7 @@ impl<'a> ApplicationHandler for App<'a> {
     }
 }
 
-fn transform_model(vertices: &mut [Vertex]) {
+fn transform_model(vertices: &mut [ModelVertex]) {
     let rm = Rotator {
         yaw: Deg(0.0),
         pitch: Deg(0.0),
@@ -168,6 +156,43 @@ fn transform_model(vertices: &mut [Vertex]) {
 }
 
 impl<'a> Renderer<'a> {
+    fn make_lines_buffer(device: &wgpu::Device) -> (wgpu::Buffer, u32) {
+        let ranges: [(Vector3<f32>, Vector3<f32>, i32, [f32; 3]); 2] = [
+            (Vector3::unit_x(), Vector3::unit_y(), 51, [1.0, 0.0, 0.0]),
+            (Vector3::unit_y(), Vector3::unit_x(), 51, [0.0, 1.0, 0.0]),
+        ];
+
+        let vertices: Vec<LineVertex> = ranges
+            .iter()
+            .map(|(spread_direction, line_direction, num_lines, color)| {
+                let h = num_lines / 2;
+                let hf = h as f32;
+                (-h..h)
+                    .map(move |x| {
+                        [
+                            (x as f32) * spread_direction + line_direction * hf,
+                            (x as f32) * spread_direction - line_direction * hf,
+                        ]
+                    })
+                    .flatten()
+                    .map(move |v| LineVertex {
+                        position: v.into(),
+                        color: *color,
+                    })
+            })
+            .flatten()
+            .collect();
+
+        (
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Vertex Buffer"),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            }),
+            vertices.len() as u32,
+        )
+    }
+
     async fn new(w: Window) -> Self {
         // The instance is a handle to our GPU
         // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
@@ -305,11 +330,11 @@ impl<'a> Renderer<'a> {
         let camera = Camera::new(
             // position the camera 1 unit up and 2 units back
             // +z is out of the screen
-            (0.0, 0.0, 2.0).into(),
+            (-1.780416, -2.3149111, 4.5232105).into(),
             // have it look at the origin
             Rotator {
-                yaw: Deg(90.0),
-                pitch: Deg(90.0),
+                yaw: Deg(36.0),
+                pitch: Deg(29.0),
                 roll: Deg(0.0),
             },
             config.width as f32 / config.height as f32,
@@ -336,29 +361,77 @@ impl<'a> Renderer<'a> {
             label: Some("camera_bind_group"),
         });
 
-        let render_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[&texture_bind_group_layout, &camera_bind_group_layout],
-                push_constant_ranges: &[],
-            });
-
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Shader"),
-            source: wgpu::ShaderSource::Wgsl(tutorial_content::TUTORIAL_6_SHADER.into()),
+        let colored_vertices_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Solid Color Shader"),
+            source: wgpu::ShaderSource::Wgsl(tutorial_content::COLORED_VERTICES_SHADER.into()),
         });
 
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
-            layout: Some(&render_pipeline_layout),
+        let lines_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Lines Render Pipeline"),
+            layout: Some(
+                &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("Lines Render Pipeline Layout"),
+                    bind_group_layouts: &[&camera_bind_group_layout],
+                    push_constant_ranges: &[],
+                }),
+            ),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                polygon_mode: wgpu::PolygonMode::Fill, // others require Features::NON_FILL_POLYGON_MODE
+                unclipped_depth: false,                // Requires Features::DEPTH_CLIP_CONTROL
+                conservative: false, // Requires Features::CONSERVATIVE_RASTERIZATION
+            },
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: &colored_vertices_shader,
                 entry_point: Some("vs_main"),
-                buffers: &[Vertex::layout()],
+                buffers: &[LineVertex::layout()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: &colored_vertices_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        });
+
+        let models_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Model Shader"),
+            source: wgpu::ShaderSource::Wgsl(tutorial_content::TUTORIAL_6_SHADER.into()),
+        });
+
+        let models_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Triangle Strip Render Pipeline"),
+            layout: Some(
+                &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Some("Triangle Strip Render Pipeline Layout"),
+                    bind_group_layouts: &[&texture_bind_group_layout, &camera_bind_group_layout],
+                    push_constant_ranges: &[],
+                }),
+            ),
+            vertex: wgpu::VertexState {
+                module: &models_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[ModelVertex::layout()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &models_shader,
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
@@ -389,16 +462,18 @@ impl<'a> Renderer<'a> {
             cache: None,
         });
 
-        let mut tri_vert: [Vertex; 3] = TRIANGLE_VERTICES.into();
+        let (lines_vertex_buffer, num_lines) = Renderer::make_lines_buffer(&device);
+
+        let mut tri_vert: [ModelVertex; 3] = TRIANGLE_VERTICES.into();
         transform_model(&mut tri_vert);
 
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let model_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Buffer"),
             contents: bytemuck::cast_slice(&tri_vert),
             usage: wgpu::BufferUsages::VERTEX,
         });
 
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let model_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Index Buffer"),
             contents: bytemuck::cast_slice(TRIANGLE_INDICES),
             usage: wgpu::BufferUsages::INDEX,
@@ -479,10 +554,13 @@ impl<'a> Renderer<'a> {
             surface_configured: false,
             frame_counter: klgl::FpsCounter::new(),
             last_printed_fps: Instant::now(),
-            render_pipeline,
-            vertex_buffer,
-            index_buffer,
-            num_indices: TRIANGLE_INDICES.len() as u32,
+            lines_pipeline,
+            lines_vertex_buffer,
+            num_lines,
+            models_pipeline,
+            model_vertex_buffer,
+            model_index_buffer,
+            num_model_indices: TRIANGLE_INDICES.len() as u32,
             textures,
             active_texture: 0,
             camera,
@@ -495,34 +573,34 @@ impl<'a> Renderer<'a> {
 
     fn swap_model(&mut self) {
         let (vertices, indices) = {
-            if self.num_indices == TRIANGLE_INDICES.len() as u32 {
-                let mut hex_vert: [Vertex; 5] = HEX_VERTICES.into();
+            if self.num_model_indices == TRIANGLE_INDICES.len() as u32 {
+                let mut hex_vert: [ModelVertex; 5] = HEX_VERTICES.into();
                 transform_model(&mut hex_vert);
                 (hex_vert.to_vec(), HEX_INDICES)
             } else {
-                let mut tri_vert: [Vertex; 3] = TRIANGLE_VERTICES.into();
+                let mut tri_vert: [ModelVertex; 3] = TRIANGLE_VERTICES.into();
                 transform_model(&mut tri_vert);
                 (tri_vert.to_vec(), TRIANGLE_INDICES)
             }
         };
 
-        self.vertex_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Vertex Buffer"),
-                contents: bytemuck::cast_slice(&vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
+        self.model_vertex_buffer =
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Vertex Buffer"),
+                    contents: bytemuck::cast_slice(&vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
 
-        self.index_buffer = self
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Index Buffer"),
-                contents: bytemuck::cast_slice(indices),
-                usage: wgpu::BufferUsages::INDEX,
-            });
+        self.model_index_buffer =
+            self.device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Index Buffer"),
+                    contents: bytemuck::cast_slice(indices),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
 
-        self.num_indices = indices.len() as u32;
+        self.num_model_indices = indices.len() as u32;
     }
 
     #[allow(unused_variables)]
@@ -661,9 +739,9 @@ impl<'a> Renderer<'a> {
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(wgpu::Color {
-                                r: 0.1,
-                                g: 0.2,
-                                b: 0.3,
+                                r: 0.0,
+                                g: 0.0,
+                                b: 0.0,
                                 a: 1.0,
                             }),
                             store: wgpu::StoreOp::Store,
@@ -675,13 +753,22 @@ impl<'a> Renderer<'a> {
                 occlusion_query_set: None,
             });
 
+            // Draw lines
+            if self.num_lines != 0 {
+                render_pass.set_pipeline(&self.lines_pipeline);
+                render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, self.lines_vertex_buffer.slice(..));
+                render_pass.draw(0..self.num_lines, 0..self.num_lines / 2);
+            }
+
             let chosen_texture_bind_group = &self.textures[self.active_texture as usize].bind_group;
-            render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_pipeline(&self.models_pipeline);
             render_pass.set_bind_group(0, chosen_texture_bind_group, &[]);
             render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
+            render_pass.set_vertex_buffer(0, self.model_vertex_buffer.slice(..));
+            render_pass
+                .set_index_buffer(self.model_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            render_pass.draw_indexed(0..self.num_model_indices, 0, 0..1);
         }
 
         self.queue.submit(iter::once(encoder.finish()));

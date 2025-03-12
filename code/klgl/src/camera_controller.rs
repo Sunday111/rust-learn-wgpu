@@ -130,7 +130,11 @@ impl CameraController {
                     + camera.forward() * (forward as f32) * self.move_speed
                     + camera.right() * (right as f32) * self.move_speed,
             );
-            println!("eye: {:?}", camera.get_eye());
+            println!(
+                "eye: {:?}, rotator: {:?}",
+                camera.get_eye(),
+                camera.get_rotator()
+            );
         }
     }
 }

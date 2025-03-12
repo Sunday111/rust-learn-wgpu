@@ -1,7 +1,7 @@
 use cgmath::Matrix4;
 use cgmath::{Deg, Rad};
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct Rotator {
     pub yaw: Deg<f32>,
     pub pitch: Deg<f32>,
