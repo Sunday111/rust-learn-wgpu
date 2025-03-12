@@ -41,14 +41,6 @@ impl CameraController {
 
         match event {
             WindowEvent::Focused(focused) => false,
-            WindowEvent::CursorMoved {
-                device_id,
-                position,
-            } => {
-                self.prev_cursor = self.current_cursor;
-                self.current_cursor = Some(Vector2::new(position.x as f32, position.y as f32));
-                false
-            }
             WindowEvent::Touch(touch) => {
                 match touch.phase {
                     TouchPhase::Started => {
@@ -56,6 +48,8 @@ impl CameraController {
                     }
                     TouchPhase::Ended | TouchPhase::Cancelled => {
                         self.rmb = false;
+                        self.prev_cursor = None;
+                        self.current_cursor = None;
                     }
                     TouchPhase::Moved => {
                         self.prev_cursor = self.current_cursor;
@@ -66,6 +60,14 @@ impl CameraController {
                     }
                 }
                 true
+            }
+            WindowEvent::CursorMoved {
+                device_id,
+                position,
+            } => {
+                self.prev_cursor = self.current_cursor;
+                self.current_cursor = Some(Vector2::new(position.x as f32, position.y as f32));
+                false
             }
             WindowEvent::MouseInput {
                 device_id,
