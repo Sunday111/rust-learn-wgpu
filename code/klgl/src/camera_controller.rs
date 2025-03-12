@@ -1,4 +1,5 @@
 use crate::camera::Camera;
+use cgmath::{Deg, Vector2};
 use winit::event::MouseButton;
 
 pub struct CameraController {
@@ -7,21 +8,34 @@ pub struct CameraController {
     left: bool,
     right: bool,
 
-    speed: f32,
+    rmb: bool,
+    prev_cursor: Option<Vector2<f32>>,
+    current_cursor: Option<Vector2<f32>>,
+
+    move_speed: f32,
+    rotation_speed: f32,
 }
 
 impl CameraController {
-    pub fn new(speed: f32) -> Self {
+    pub fn new(move_speed: f32, rotation_speed: f32) -> Self {
         Self {
-            speed,
+            move_speed,
+            rotation_speed,
             forward: false,
             back: false,
             left: false,
+            rmb: false,
+            prev_cursor: None,
+            current_cursor: None,
             right: false,
         }
     }
 
-    pub fn process_events(&mut self, event: &winit::event::WindowEvent) -> bool {
+    pub fn process_events(
+        &mut self,
+        window: &winit::window::Window,
+        event: &winit::event::WindowEvent,
+    ) -> bool {
         use winit::event::{ElementState, KeyEvent, WindowEvent};
         use winit::keyboard::{KeyCode, PhysicalKey};
 
@@ -30,13 +44,18 @@ impl CameraController {
             WindowEvent::CursorMoved {
                 device_id,
                 position,
-            } => false,
+            } => {
+                self.prev_cursor = self.current_cursor;
+                self.current_cursor = Some(Vector2::new(position.x as f32, position.y as f32));
+                false
+            }
             WindowEvent::MouseInput {
                 device_id,
                 state,
                 button,
             } => {
                 if *button == MouseButton::Right {
+                    self.rmb = state.is_pressed();
                     true
                 } else {
                     false
@@ -76,7 +95,19 @@ impl CameraController {
         }
     }
 
-    pub fn update_camera(&self, camera: &mut Camera) {
+    pub fn update_camera(&mut self, camera: &mut Camera) {
+        match (self.rmb, self.prev_cursor, self.current_cursor) {
+            (true, Some(prev), Some(curr)) => {
+                let delta = (curr - prev) * self.rotation_speed;
+                let mut r = *camera.get_rotator();
+                r.yaw += Deg(delta.x);
+                r.pitch += Deg(delta.y);
+                camera.set_rotator(r);
+                self.prev_cursor = None;
+            }
+            _ => {}
+        };
+
         let mut forward = 0;
         let mut right = 0;
 
@@ -96,8 +127,8 @@ impl CameraController {
         if forward != 0 || right != 0 {
             camera.set_eye(
                 camera.get_eye()
-                    + camera.forward() * (forward as f32) * self.speed
-                    + camera.right() * (right as f32) * self.speed,
+                    + camera.forward() * (forward as f32) * self.move_speed
+                    + camera.right() * (right as f32) * self.move_speed,
             );
             println!("eye: {:?}", camera.get_eye());
         }

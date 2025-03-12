@@ -1,4 +1,4 @@
-use cgmath::Deg;
+use cgmath::{Deg, Transform};
 use std::{iter, pin::Pin};
 use web_time::Instant;
 
@@ -40,7 +40,7 @@ impl Vertex {
     }
 }
 
-const TRIANGLE_VERTICES: &[Vertex] = &[
+const TRIANGLE_VERTICES: [Vertex; 3] = [
     Vertex {
         position: [0.0, 0.5, 0.0],
         color: [1.0, 0.0, 0.0],
@@ -60,7 +60,7 @@ const TRIANGLE_VERTICES: &[Vertex] = &[
 
 const TRIANGLE_INDICES: &[u16] = &[0, 1, 2];
 
-const HEX_VERTICES: &[Vertex] = &[
+const HEX_VERTICES: [Vertex; 5] = [
     Vertex {
         position: [-0.0868241, 0.49240386, 0.0],
         color: [1.0; 3],
@@ -151,6 +151,19 @@ impl<'a> ApplicationHandler for App<'a> {
             Some(s) => s.window_event(event_loop, window_id, event),
             _ => {}
         }
+    }
+}
+
+fn transform_model(vertices: &mut [Vertex]) {
+    let rm = Rotator {
+        yaw: Deg(0.0),
+        pitch: Deg(0.0),
+        roll: Deg(0.0),
+    }
+    .to_matrix();
+
+    for v in vertices {
+        v.position = rm.transform_point(v.position.into()).into();
     }
 }
 
@@ -345,11 +358,9 @@ impl<'a> Renderer<'a> {
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
-                // 3.
                 module: &shader,
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
-                    // 4.
                     format: config.format,
                     blend: Some(wgpu::BlendState::REPLACE),
                     write_mask: wgpu::ColorWrites::ALL,
@@ -378,9 +389,12 @@ impl<'a> Renderer<'a> {
             cache: None,
         });
 
+        let mut tri_vert: [Vertex; 3] = TRIANGLE_VERTICES.into();
+        transform_model(&mut tri_vert);
+
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Buffer"),
-            contents: bytemuck::cast_slice(TRIANGLE_VERTICES),
+            contents: bytemuck::cast_slice(&tri_vert),
             usage: wgpu::BufferUsages::VERTEX,
         });
 
@@ -475,16 +489,20 @@ impl<'a> Renderer<'a> {
             camera_uniform,
             camera_buffer,
             camera_bind_group,
-            camera_controller: CameraController::new(0.2),
+            camera_controller: CameraController::new(0.2, 0.2),
         }
     }
 
     fn swap_model(&mut self) {
         let (vertices, indices) = {
             if self.num_indices == TRIANGLE_INDICES.len() as u32 {
-                (HEX_VERTICES, HEX_INDICES)
+                let mut hex_vert: [Vertex; 5] = HEX_VERTICES.into();
+                transform_model(&mut hex_vert);
+                (hex_vert.to_vec(), HEX_INDICES)
             } else {
-                (TRIANGLE_VERTICES, TRIANGLE_INDICES)
+                let mut tri_vert: [Vertex; 3] = TRIANGLE_VERTICES.into();
+                transform_model(&mut tri_vert);
+                (tri_vert.to_vec(), TRIANGLE_INDICES)
             }
         };
 
@@ -492,7 +510,7 @@ impl<'a> Renderer<'a> {
             .device
             .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Vertex Buffer"),
-                contents: bytemuck::cast_slice(vertices),
+                contents: bytemuck::cast_slice(&vertices),
                 usage: wgpu::BufferUsages::VERTEX,
             });
 
@@ -509,7 +527,7 @@ impl<'a> Renderer<'a> {
 
     #[allow(unused_variables)]
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
-        if self.camera_controller.process_events(&event) {
+        if self.camera_controller.process_events(&self.window, &event) {
             return;
         }
 
