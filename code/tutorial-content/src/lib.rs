@@ -4,5 +4,6 @@ pub const TUTORIAL_3_SHADER: &'static str = include_str!("../../../content/tutor
 pub const TUTORIAL_4_SHADER: &'static str = include_str!("../../../content/tutorial_4_shader.wgsl");
 pub const TUTORIAL_5_SHADER: &'static str = include_str!("../../../content/tutorial_5_shader.wgsl");
 pub const TUTORIAL_6_SHADER: &'static str = include_str!("../../../content/tutorial_6_shader.wgsl");
+pub const TUTORIAL_7_SHADER: &'static str = include_str!("../../../content/tutorial_7_shader.wgsl");
 pub const COLORED_VERTICES_SHADER: &'static str =
     include_str!("../../../content/colored_vertices_shader.wgsl");
