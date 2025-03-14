@@ -1,4 +1,4 @@
-use cgmath::{Deg, Transform, Vector3, prelude::*};
+use cgmath::{Deg, Transform, Vector3};
 use std::{iter, pin::Pin};
 use web_time::Instant;
 
@@ -378,11 +378,11 @@ impl<'a> Renderer<'a> {
         let camera = Camera::new(
             // position the camera 1 unit up and 2 units back
             // +z is out of the screen
-            (-1.780416, -2.3149111, 4.5232105).into(),
+            (5.41923, 0.19568399, 6.468395).into(),
             // have it look at the origin
             Rotator {
-                yaw: Deg(36.0),
-                pitch: Deg(29.0),
+                yaw: Deg(81.0),
+                pitch: Deg(56.0),
                 roll: Deg(0.0),
             },
             config.width as f32 / config.height as f32,
@@ -513,34 +513,25 @@ impl<'a> Renderer<'a> {
         let (lines_vertex_buffer, num_lines) = Renderer::make_lines_buffer(&device);
 
         const NUM_INSTANCES_PER_ROW: u32 = 10;
-        const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
-            NUM_INSTANCES_PER_ROW as f32 * 0.5,
-            0.0,
-            NUM_INSTANCES_PER_ROW as f32 * 0.5,
-        );
         let model_instances = (0..NUM_INSTANCES_PER_ROW)
-            .flat_map(|z| {
+            .flat_map(|y| {
                 (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                    let position = cgmath::Vector3 {
-                        x: x as f32,
-                        y: 0.0,
-                        z: z as f32,
-                    } - INSTANCE_DISPLACEMENT;
-
-                    let rotation = if position.is_zero() {
-                        // this is needed so an object at (0, 0, 0) won't get scaled to zero
-                        // as Quaternions can affect scale if they're not created correctly
-                        cgmath::Quaternion::from_axis_angle(
-                            cgmath::Vector3::unit_z(),
-                            cgmath::Deg(0.0),
-                        )
-                    } else {
-                        cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
-                    };
+                    let delta = 60.0;
+                    let rotation =
+                        Rotator {
+                            yaw: Deg(-delta * 0.5
+                                + delta * ((x + 1) as f32 / NUM_INSTANCES_PER_ROW as f32)),
+                            pitch: Deg(-delta * 0.5
+                                + delta * ((y + 1) as f32 / NUM_INSTANCES_PER_ROW as f32)),
+                            roll: Deg(0.0),
+                        };
 
                     Instance {
-                        model: (cgmath::Matrix4::from_translation(position)
-                            * cgmath::Matrix4::from(rotation))
+                        model: (cgmath::Matrix4::from_translation(cgmath::Vector3 {
+                            x: x as f32,
+                            y: y as f32,
+                            z: 0.0,
+                        }) * rotation.to_matrix())
                         .into(),
                     }
                 })
