@@ -241,6 +241,38 @@ impl<'a> Renderer<'a> {
         )
     }
 
+    fn compute_model_instances(v: &mut Vec<Instance>, angle: Deg<f32>) {
+        const NUM_INSTANCES_PER_ROW: u32 = 10;
+        v.clear();
+        v.extend((0..NUM_INSTANCES_PER_ROW).flat_map(|y| {
+            (0..NUM_INSTANCES_PER_ROW).map(move |x| {
+                let rotation = Rotator {
+                    yaw: angle * (-0.5 + ((x + 1) as f32 / NUM_INSTANCES_PER_ROW as f32)),
+                    pitch: angle * (-0.5 + ((y + 1) as f32 / NUM_INSTANCES_PER_ROW as f32)),
+                    roll: Deg(0.0),
+                };
+
+                Instance {
+                    model: (cgmath::Matrix4::from_translation(cgmath::Vector3 {
+                        x: x as f32,
+                        y: y as f32,
+                        z: 0.0,
+                    }) * rotation.to_matrix())
+                    .into(),
+                }
+            })
+        }));
+    }
+
+    fn update_model_instances(&mut self, angle: Deg<f32>) {
+        Self::compute_model_instances(&mut self.model_instances, angle);
+        self.queue.write_buffer(
+            &self.model_instances_buffer,
+            0,
+            bytemuck::cast_slice(&self.model_instances[..]),
+        );
+    }
+
     async fn new(w: Window) -> Self {
         // The instance is a handle to our GPU
         // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
@@ -512,36 +544,13 @@ impl<'a> Renderer<'a> {
 
         let (lines_vertex_buffer, num_lines) = Renderer::make_lines_buffer(&device);
 
-        const NUM_INSTANCES_PER_ROW: u32 = 10;
-        let model_instances = (0..NUM_INSTANCES_PER_ROW)
-            .flat_map(|y| {
-                (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                    let delta = 60.0;
-                    let rotation =
-                        Rotator {
-                            yaw: Deg(-delta * 0.5
-                                + delta * ((x + 1) as f32 / NUM_INSTANCES_PER_ROW as f32)),
-                            pitch: Deg(-delta * 0.5
-                                + delta * ((y + 1) as f32 / NUM_INSTANCES_PER_ROW as f32)),
-                            roll: Deg(0.0),
-                        };
-
-                    Instance {
-                        model: (cgmath::Matrix4::from_translation(cgmath::Vector3 {
-                            x: x as f32,
-                            y: y as f32,
-                            z: 0.0,
-                        }) * rotation.to_matrix())
-                        .into(),
-                    }
-                })
-            })
-            .collect::<Vec<_>>();
+        let mut model_instances: Vec<Instance> = vec![];
+        Renderer::compute_model_instances(&mut model_instances, Deg(45.0));
 
         let model_instances_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Instance Buffer"),
             contents: bytemuck::cast_slice(&model_instances),
-            usage: wgpu::BufferUsages::VERTEX,
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
         let mut tri_vert: [ModelVertex; 3] = TRIANGLE_VERTICES.into();
@@ -792,6 +801,10 @@ impl<'a> Renderer<'a> {
             0,
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
+
+        self.update_model_instances(Deg(
+            90.0 + 80.0 * (dur_since_start.as_secs_f32() * 2.0).sin()
+        ));
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
