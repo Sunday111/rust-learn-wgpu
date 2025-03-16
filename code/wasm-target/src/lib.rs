@@ -16,3 +16,4 @@ wasm_bindgen_async_fn!(run_tutorial_4, tutorial4_buffers_and_indices);
 wasm_bindgen_async_fn!(run_tutorial_5, tutorial5_textures);
 wasm_bindgen_async_fn!(run_tutorial_6, tutorial6_uniforms);
 wasm_bindgen_async_fn!(run_tutorial_7, tutorial7_instancing);
+wasm_bindgen_async_fn!(run_tutorial_8, tutorial8_depth);

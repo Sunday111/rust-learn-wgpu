@@ -1918,6 +1918,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "tutorial8-depth"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "cfg-if",
+ "cgmath",
+ "console_error_panic_hook",
+ "console_log",
+ "env_logger",
+ "klgl",
+ "log",
+ "pollster",
+ "tutorial-content",
+ "web-sys",
+ "web-time",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2061,6 +2082,7 @@ dependencies = [
  "tutorial5-textures",
  "tutorial6-uniforms",
  "tutorial7-instancing",
+ "tutorial8-depth",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
