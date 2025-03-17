@@ -135,6 +135,8 @@ struct Renderer<'a> {
     frame_counter: klgl::FpsCounter,
     last_printed_fps: Instant,
 
+    depth_texture: klgl::Texture,
+
     lines_pipeline: wgpu::RenderPipeline,
     lines_vertex_buffer: wgpu::Buffer,
     num_lines: u32,
@@ -256,7 +258,7 @@ impl<'a> Renderer<'a> {
                     model: (cgmath::Matrix4::from_translation(cgmath::Vector3 {
                         x: x as f32,
                         y: y as f32,
-                        z: 0.0,
+                        z: 1.0,
                     }) * rotation.to_matrix())
                     .into(),
                 }
@@ -356,6 +358,9 @@ impl<'a> Renderer<'a> {
             .find(|f| f.is_srgb())
             .unwrap_or(surface_caps.formats[0]);
 
+        let depth_texture =
+            klgl::Texture::create_depth_texture(&device, size.width, size.height, "depth_texture");
+
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 entries: &[
@@ -446,6 +451,16 @@ impl<'a> Renderer<'a> {
             source: wgpu::ShaderSource::Wgsl(tutorial_content::COLORED_VERTICES_SHADER.into()),
         });
 
+        let depth_stencil_state = Some(wgpu::DepthStencilState {
+            format: klgl::Texture::DEPTH_FORMAT,
+            depth_write_enabled: true,
+            // The depth_compare function tells us when to discard a new pixel.
+            // Using LESS means pixels will be drawn front to back.
+            depth_compare: wgpu::CompareFunction::Less,
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        });
+
         let lines_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Lines Render Pipeline"),
             layout: Some(
@@ -480,7 +495,7 @@ impl<'a> Renderer<'a> {
                 })],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             }),
-            depth_stencil: None,
+            depth_stencil: depth_stencil_state.clone(),
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -532,7 +547,7 @@ impl<'a> Renderer<'a> {
                 // Requires Features::CONSERVATIVE_RASTERIZATION
                 conservative: false,
             },
-            depth_stencil: None,
+            depth_stencil: depth_stencil_state,
             multisample: wgpu::MultisampleState {
                 count: 1,
                 mask: !0,
@@ -639,6 +654,7 @@ impl<'a> Renderer<'a> {
             queue,
             config,
             size,
+            depth_texture,
             clear_color: wgpu::Color::BLACK,
             surface_configured: false,
             frame_counter: klgl::FpsCounter::new(),
@@ -777,6 +793,12 @@ impl<'a> Renderer<'a> {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
+            self.depth_texture = klgl::Texture::create_depth_texture(
+                &self.device,
+                self.config.width,
+                self.config.height,
+                "depth_texture",
+            );
             self.camera
                 .set_aspect(new_size.width as f32 / new_size.height as f32);
         }
@@ -843,7 +865,14 @@ impl<'a> Renderer<'a> {
                         },
                     }),
                 ],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_texture.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
