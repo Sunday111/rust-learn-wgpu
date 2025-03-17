@@ -4,9 +4,7 @@ use env_logger::Env;
 use winit::event_loop::{ControlFlow, EventLoop};
 
 mod app;
-mod line_vertex;
 mod lines_draw_pass;
-mod model_vertex;
 mod models_draw_pass;
 
 pub async fn run() {
@@ -26,6 +24,5 @@ pub async fn run() {
     event_loop.set_control_flow(ControlFlow::Poll);
 
     let mut app = crate::app::App::new();
-
     event_loop.run_app(&mut app).unwrap();
 }

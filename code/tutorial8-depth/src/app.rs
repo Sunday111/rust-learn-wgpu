@@ -247,11 +247,6 @@ impl<'a> Renderer<'a> {
             label: Some("camera_bind_group"),
         });
 
-        let colored_vertices_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Solid Color Shader"),
-            source: wgpu::ShaderSource::Wgsl(tutorial_content::COLORED_VERTICES_SHADER.into()),
-        });
-
         let depth_stencil_state = Some(wgpu::DepthStencilState {
             format: klgl::Texture::DEPTH_FORMAT,
             depth_write_enabled: true,
@@ -262,11 +257,6 @@ impl<'a> Renderer<'a> {
             bias: wgpu::DepthBiasState::default(),
         });
 
-        let models_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Model Shader"),
-            source: wgpu::ShaderSource::Wgsl(tutorial_content::TUTORIAL_7_SHADER.into()),
-        });
-
         let models_draw_pass = ModelsDrawPass::new(
             &device,
             &queue,
@@ -274,8 +264,6 @@ impl<'a> Renderer<'a> {
             &texture_bind_group_layout,
             config.format,
             depth_stencil_state.clone(),
-            &models_shader,
-            &models_shader,
         );
 
         let lines_draw_pass = LinesDrawPass::new(
@@ -283,8 +271,6 @@ impl<'a> Renderer<'a> {
             &camera_bind_group_layout,
             config.format,
             depth_stencil_state,
-            &colored_vertices_shader,
-            &colored_vertices_shader,
         );
 
         Self {

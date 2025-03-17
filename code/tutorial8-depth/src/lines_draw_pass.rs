@@ -1,11 +1,31 @@
 use cgmath::Vector3;
 use wgpu::util::DeviceExt;
 
-use crate::line_vertex::LineVertex;
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Vertex {
+    pub position: [f32; 3],
+    pub color: [f32; 3],
+}
+
+impl Vertex {
+    const ATTRIBS: [wgpu::VertexAttribute; 2] =
+        wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
+
+    pub fn layout() -> wgpu::VertexBufferLayout<'static> {
+        use std::mem;
+
+        wgpu::VertexBufferLayout {
+            array_stride: mem::size_of::<Self>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &Self::ATTRIBS,
+        }
+    }
+}
 
 pub struct LinesDrawPass {
-    pub lines_pipeline: wgpu::RenderPipeline,
-    pub lines_vertex_buffer: wgpu::Buffer,
+    pub pipeline: wgpu::RenderPipeline,
+    pub vertex_buffer: wgpu::Buffer,
     pub num_lines: u32,
 }
 
@@ -13,22 +33,19 @@ impl LinesDrawPass {
     pub fn new(
         device: &wgpu::Device,
         camera_bind_group_layout: &wgpu::BindGroupLayout,
-        texture_format: wgpu::TextureFormat,
+        surface_format: wgpu::TextureFormat,
         depth_stencil_state: Option<wgpu::DepthStencilState>,
-        vertex_shader: &wgpu::ShaderModule,
-        fragment_shader: &wgpu::ShaderModule,
     ) -> Self {
         let (lines_vertex_buffer, num_lines) = Self::make_lines_buffer(device);
+
         Self {
-            lines_pipeline: Self::create_pipeline(
+            pipeline: Self::create_pipeline(
                 device,
                 camera_bind_group_layout,
-                texture_format,
+                surface_format,
                 depth_stencil_state,
-                vertex_shader,
-                fragment_shader,
             ),
-            lines_vertex_buffer,
+            vertex_buffer: lines_vertex_buffer,
             num_lines,
         }
     }
@@ -38,9 +55,11 @@ impl LinesDrawPass {
         camera_bind_group_layout: &wgpu::BindGroupLayout,
         texture_format: wgpu::TextureFormat,
         depth_stencil_state: Option<wgpu::DepthStencilState>,
-        vertex_shader: &wgpu::ShaderModule,
-        fragment_shader: &wgpu::ShaderModule,
     ) -> wgpu::RenderPipeline {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Solid Color Shader"),
+            source: wgpu::ShaderSource::Wgsl(tutorial_content::COLORED_VERTICES_SHADER.into()),
+        });
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Lines Render Pipeline"),
             layout: Some(
@@ -60,13 +79,13 @@ impl LinesDrawPass {
                 conservative: false, // Requires Features::CONSERVATIVE_RASTERIZATION
             },
             vertex: wgpu::VertexState {
-                module: vertex_shader,
+                module: &shader,
                 entry_point: Some("vs_main"),
-                buffers: &[LineVertex::layout()],
+                buffers: &[Vertex::layout()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
-                module: fragment_shader,
+                module: &shader,
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: texture_format,
@@ -88,9 +107,9 @@ impl LinesDrawPass {
 
     pub fn render(&self, render_pass: &mut wgpu::RenderPass, camera_bind_group: &wgpu::BindGroup) {
         if self.num_lines != 0 {
-            render_pass.set_pipeline(&self.lines_pipeline);
+            render_pass.set_pipeline(&self.pipeline);
             render_pass.set_bind_group(0, camera_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.lines_vertex_buffer.slice(..));
+            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.draw(0..self.num_lines, 0..self.num_lines / 2);
         }
     }
@@ -101,7 +120,7 @@ impl LinesDrawPass {
             (Vector3::unit_y(), Vector3::unit_x(), 51, [0.0, 1.0, 0.0]),
         ];
 
-        let vertices: Vec<LineVertex> = ranges
+        let vertices: Vec<Vertex> = ranges
             .iter()
             .map(|(spread_direction, line_direction, num_lines, color)| {
                 let h = num_lines / 2;
@@ -114,7 +133,7 @@ impl LinesDrawPass {
                         ]
                     })
                     .flatten()
-                    .map(move |v| LineVertex {
+                    .map(move |v| Vertex {
                         position: v.into(),
                         color: *color,
                     })

@@ -2,9 +2,30 @@ use cgmath::{Deg, Transform};
 use klgl::Rotator;
 use wgpu::util::DeviceExt;
 
-use crate::model_vertex::ModelVertex;
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct Vertex {
+    pub position: [f32; 3],
+    pub color: [f32; 3],
+    pub tex_coords: [f32; 2],
+}
 
-fn transform_model(vertices: &mut [ModelVertex]) {
+impl Vertex {
+    const ATTRIBS: [wgpu::VertexAttribute; 3] =
+        wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2];
+
+    fn layout() -> wgpu::VertexBufferLayout<'static> {
+        use std::mem;
+
+        wgpu::VertexBufferLayout {
+            array_stride: mem::size_of::<Self>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &Self::ATTRIBS,
+        }
+    }
+}
+
+fn transform_model(vertices: &mut [Vertex]) {
     let rm = Rotator {
         yaw: Deg(0.0),
         pitch: Deg(0.0),
@@ -17,18 +38,18 @@ fn transform_model(vertices: &mut [ModelVertex]) {
     }
 }
 
-const TRIANGLE_VERTICES: [ModelVertex; 3] = [
-    ModelVertex {
+const TRIANGLE_VERTICES: [Vertex; 3] = [
+    Vertex {
         position: [0.0, 0.5, 0.0],
         color: [1.0, 0.0, 0.0],
         tex_coords: [0.5, 0.0],
     },
-    ModelVertex {
+    Vertex {
         position: [-0.5, -0.5, 0.0],
         color: [0.0, 1.0, 0.0],
         tex_coords: [0.0, 1.0],
     },
-    ModelVertex {
+    Vertex {
         position: [0.5, -0.5, 0.0],
         color: [0.0, 0.0, 1.0],
         tex_coords: [1.0, 1.0],
@@ -37,28 +58,28 @@ const TRIANGLE_VERTICES: [ModelVertex; 3] = [
 
 const TRIANGLE_INDICES: &[u16] = &[0, 1, 2];
 
-const HEX_VERTICES: [ModelVertex; 5] = [
-    ModelVertex {
+const HEX_VERTICES: [Vertex; 5] = [
+    Vertex {
         position: [-0.0868241, 0.49240386, 0.0],
         color: [1.0; 3],
         tex_coords: [0.4131759, 0.99240386],
     }, // A
-    ModelVertex {
+    Vertex {
         position: [-0.49513406, 0.06958647, 0.0],
         color: [1.0; 3],
         tex_coords: [0.0048659444, 0.56958647],
     }, // B
-    ModelVertex {
+    Vertex {
         position: [-0.21918549, -0.44939706, 0.0],
         color: [1.0; 3],
         tex_coords: [0.28081453, 0.05060294],
     }, // C
-    ModelVertex {
+    Vertex {
         position: [0.35966998, -0.3473291, 0.0],
         color: [1.0; 3],
         tex_coords: [0.85967, 0.1526709],
     }, // D
-    ModelVertex {
+    Vertex {
         position: [0.44147372, 0.2347359, 0.0],
         color: [1.0; 3],
         tex_coords: [0.9414737, 0.7347359],
@@ -113,12 +134,12 @@ impl Instance {
 }
 
 pub struct ModelsDrawPass {
-    pub models_pipeline: wgpu::RenderPipeline,
-    pub model_vertex_buffer: wgpu::Buffer,
-    pub model_index_buffer: wgpu::Buffer,
-    model_instances: Vec<Instance>,
-    pub model_instances_buffer: wgpu::Buffer,
-    pub num_model_indices: u32,
+    pub pipeline: wgpu::RenderPipeline,
+    pub vertex_buffer: wgpu::Buffer,
+    pub index_buffer: wgpu::Buffer,
+    instances: Vec<Instance>,
+    pub instances_buffer: wgpu::Buffer,
+    pub num_indices: u32,
     pub textures: [wgpu::BindGroup; 2],
     pub active_texture: u32,
 }
@@ -131,8 +152,6 @@ impl ModelsDrawPass {
         texture_bind_group_layout: &wgpu::BindGroupLayout,
         surface_format: wgpu::TextureFormat,
         depth_stencil_state: Option<wgpu::DepthStencilState>,
-        vertex_shader: &wgpu::ShaderModule,
-        fragment_shader: &wgpu::ShaderModule,
     ) -> Self {
         let models_pipeline = ModelsDrawPass::create_render_pipeline(
             &device,
@@ -140,8 +159,6 @@ impl ModelsDrawPass {
             &texture_bind_group_layout,
             surface_format,
             depth_stencil_state,
-            &vertex_shader,
-            &fragment_shader,
         );
 
         let mut model_instances: Vec<Instance> = vec![];
@@ -153,7 +170,7 @@ impl ModelsDrawPass {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
-        let mut tri_vert: [ModelVertex; 3] = TRIANGLE_VERTICES.into();
+        let mut tri_vert: [Vertex; 3] = TRIANGLE_VERTICES.into();
         transform_model(&mut tri_vert);
 
         let model_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -222,12 +239,12 @@ impl ModelsDrawPass {
         };
 
         Self {
-            models_pipeline,
-            model_vertex_buffer,
-            model_index_buffer,
-            model_instances,
-            model_instances_buffer,
-            num_model_indices: num_indices as u32,
+            pipeline: models_pipeline,
+            vertex_buffer: model_vertex_buffer,
+            index_buffer: model_index_buffer,
+            instances: model_instances,
+            instances_buffer: model_instances_buffer,
+            num_indices: num_indices as u32,
             textures,
             active_texture: 0,
         }
@@ -257,11 +274,11 @@ impl ModelsDrawPass {
     }
 
     pub fn update_model_instances(&mut self, queue: &wgpu::Queue, angle: Deg<f32>) {
-        Self::compute_model_instances(&mut self.model_instances, angle);
+        Self::compute_model_instances(&mut self.instances, angle);
         queue.write_buffer(
-            &self.model_instances_buffer,
+            &self.instances_buffer,
             0,
-            bytemuck::cast_slice(&self.model_instances[..]),
+            bytemuck::cast_slice(&self.instances[..]),
         );
     }
 
@@ -271,9 +288,12 @@ impl ModelsDrawPass {
         texture_bind_group_layout: &wgpu::BindGroupLayout,
         surface_format: wgpu::TextureFormat,
         depth_stencil_state: Option<wgpu::DepthStencilState>,
-        vertex_shader: &wgpu::ShaderModule,
-        fragment_shader: &wgpu::ShaderModule,
     ) -> wgpu::RenderPipeline {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Model Shader"),
+            source: wgpu::ShaderSource::Wgsl(tutorial_content::TUTORIAL_7_SHADER.into()),
+        });
+
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Triangle Strip Render Pipeline"),
             layout: Some(
@@ -284,13 +304,13 @@ impl ModelsDrawPass {
                 }),
             ),
             vertex: wgpu::VertexState {
-                module: &vertex_shader,
+                module: &shader,
                 entry_point: Some("vs_main"),
-                buffers: &[ModelVertex::layout(), Instance::layout()],
+                buffers: &[Vertex::layout(), Instance::layout()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
-                module: &fragment_shader,
+                module: &shader,
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: surface_format,
@@ -324,30 +344,30 @@ impl ModelsDrawPass {
 
     pub fn swap_model(&mut self, device: &wgpu::Device) {
         let (vertices, indices) = {
-            if self.num_model_indices == TRIANGLE_INDICES.len() as u32 {
-                let mut hex_vert: [ModelVertex; 5] = HEX_VERTICES.into();
+            if self.num_indices == TRIANGLE_INDICES.len() as u32 {
+                let mut hex_vert: [Vertex; 5] = HEX_VERTICES.into();
                 transform_model(&mut hex_vert);
                 (hex_vert.to_vec(), HEX_INDICES)
             } else {
-                let mut tri_vert: [ModelVertex; 3] = TRIANGLE_VERTICES.into();
+                let mut tri_vert: [Vertex; 3] = TRIANGLE_VERTICES.into();
                 transform_model(&mut tri_vert);
                 (tri_vert.to_vec(), TRIANGLE_INDICES)
             }
         };
 
-        self.model_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        self.vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Buffer"),
             contents: bytemuck::cast_slice(&vertices),
             usage: wgpu::BufferUsages::VERTEX,
         });
 
-        self.model_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        self.index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Index Buffer"),
             contents: bytemuck::cast_slice(indices),
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        self.num_model_indices = indices.len() as u32;
+        self.num_indices = indices.len() as u32;
     }
 
     pub fn set_active_texture(&mut self, index: u32) {
@@ -355,16 +375,12 @@ impl ModelsDrawPass {
     }
 
     pub fn render(&self, render_pass: &mut wgpu::RenderPass, camera_bind_group: &wgpu::BindGroup) {
-        render_pass.set_pipeline(&self.models_pipeline);
+        render_pass.set_pipeline(&self.pipeline);
         render_pass.set_bind_group(0, &self.textures[self.active_texture as usize], &[]);
         render_pass.set_bind_group(1, camera_bind_group, &[]);
-        render_pass.set_vertex_buffer(0, self.model_vertex_buffer.slice(..));
-        render_pass.set_vertex_buffer(1, self.model_instances_buffer.slice(..));
-        render_pass.set_index_buffer(self.model_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-        render_pass.draw_indexed(
-            0..self.num_model_indices,
-            0,
-            0..self.model_instances.len() as _,
-        );
+        render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+        render_pass.set_vertex_buffer(1, self.instances_buffer.slice(..));
+        render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+        render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as _);
     }
 }
