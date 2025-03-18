@@ -7,3 +7,5 @@ pub const TUTORIAL_6_SHADER: &'static str = include_str!("../../../content/tutor
 pub const TUTORIAL_7_SHADER: &'static str = include_str!("../../../content/tutorial_7_shader.wgsl");
 pub const COLORED_VERTICES_SHADER: &'static str =
     include_str!("../../../content/colored_vertices_shader.wgsl");
+pub const FULL_SCREEN_TEXTURE_SHADER: &'static str =
+    include_str!("../../../content/display_depth_shader.wgsl");

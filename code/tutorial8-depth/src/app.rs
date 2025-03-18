@@ -8,8 +8,8 @@ use winit::{
     window::{Window, WindowId},
 };
 
-use crate::lines_draw_pass::LinesDrawPass;
 use crate::models_draw_pass::ModelsDrawPass;
+use crate::{display_depth_draw_pass::DisplayDepthDrawPass, lines_draw_pass::LinesDrawPass};
 use klgl::{Camera, CameraController, CameraUniform, Rotator};
 
 use cgmath::Deg;
@@ -27,17 +27,20 @@ struct Renderer<'a> {
     clear_color: wgpu::Color,
     surface_configured: bool,
     frame_counter: klgl::FpsCounter,
-    last_printed_fps: Instant,
+    last_stat_print: Instant,
 
     depth_texture: klgl::Texture,
     lines_draw_pass: LinesDrawPass,
     models_draw_pass: ModelsDrawPass,
+    display_depth_draw_pass: DisplayDepthDrawPass,
 
     camera: Camera,
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     camera_controller: CameraController,
+
+    show_depth: bool,
 }
 
 pub struct App<'a> {
@@ -162,31 +165,6 @@ impl<'a> Renderer<'a> {
         let depth_texture =
             klgl::Texture::create_depth_texture(&device, size.width, size.height, "depth_texture");
 
-        let texture_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        // This should match the filterable field of the
-                        // corresponding Texture entry above.
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-                label: Some("texture_bind_group_layout"),
-            });
-
         let camera_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 entries: &[wgpu::BindGroupLayoutEntry {
@@ -261,7 +239,6 @@ impl<'a> Renderer<'a> {
             &device,
             &queue,
             &camera_bind_group_layout,
-            &texture_bind_group_layout,
             config.format,
             depth_stencil_state.clone(),
         );
@@ -272,6 +249,9 @@ impl<'a> Renderer<'a> {
             config.format,
             depth_stencil_state,
         );
+
+        let depth_stencil_draw_pass =
+            DisplayDepthDrawPass::new(&device, surface_format, &depth_texture);
 
         Self {
             start_time: Instant::now(),
@@ -285,14 +265,16 @@ impl<'a> Renderer<'a> {
             clear_color: wgpu::Color::BLACK,
             surface_configured: false,
             frame_counter: klgl::FpsCounter::new(),
-            last_printed_fps: Instant::now(),
+            last_stat_print: Instant::now(),
             lines_draw_pass,
             models_draw_pass,
+            display_depth_draw_pass: depth_stencil_draw_pass,
             camera,
             camera_uniform,
             camera_buffer,
             camera_bind_group,
             camera_controller: CameraController::new(0.2, 0.2),
+            show_depth: false,
         }
     }
 
@@ -316,6 +298,16 @@ impl<'a> Renderer<'a> {
                 println!("The close button was pressed; stopping");
                 event_loop.exit()
             }
+            WindowEvent::KeyboardInput { event, .. } => match event.physical_key {
+                PhysicalKey::Code(KeyCode::Escape) => {
+                    println!("The close button was pressed; stopping");
+                    event_loop.exit()
+                }
+                PhysicalKey::Code(KeyCode::KeyO) => {
+                    self.show_depth = event.state == ElementState::Pressed;
+                }
+                _ => {}
+            },
             WindowEvent::Resized(physical_size) => {
                 log::info!("physical_size: {physical_size:?}");
                 self.surface_configured = true;
@@ -385,6 +377,8 @@ impl<'a> Renderer<'a> {
                 self.config.height,
                 "depth_texture",
             );
+            self.display_depth_draw_pass
+                .on_resize(&self.device, &self.depth_texture);
             self.camera
                 .set_aspect(new_size.width as f32 / new_size.height as f32);
         }
@@ -392,10 +386,15 @@ impl<'a> Renderer<'a> {
 
     fn update(&mut self) {
         let now = Instant::now();
-        let since_last_print = now.duration_since(self.last_printed_fps);
-        if since_last_print.as_secs_f32() > 1.0 {
+        let since_last_print = now.duration_since(self.last_stat_print);
+        if since_last_print.as_secs_f32() > 5.0 {
+            self.last_stat_print = now;
             log::info!("fps: {}", self.frame_counter.framerate());
-            self.last_printed_fps = now;
+            log::info!(
+                "eye: {:?}, rotator: {:?}",
+                self.camera.get_eye(),
+                self.camera.get_rotator()
+            );
         }
 
         let dur_since_start = now.duration_since(self.start_time);
@@ -471,6 +470,28 @@ impl<'a> Renderer<'a> {
 
             self.models_draw_pass
                 .render(&mut render_pass, &self.camera_bind_group);
+        }
+
+        if self.show_depth {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Display Depth Render Pass"),
+                color_attachments: &[
+                    // This is what @location(0) in the fragment shader targets
+                    Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    }),
+                ],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            self.display_depth_draw_pass.render(&mut render_pass);
         }
 
         self.queue.submit(iter::once(encoder.finish()));
