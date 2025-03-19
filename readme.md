@@ -1,9 +1,17 @@
 # How to run
 
-Get some compiler if needed and install rust.
+## If needed
+
+get some compiler
 
 ```bash
 sudo apt install build-essential
+```
+
+install rust
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
 ## Regular targets (Windows, Linux)
