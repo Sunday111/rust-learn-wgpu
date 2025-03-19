@@ -43,6 +43,9 @@ path = "../tutorial7-instancing"
 [dependencies.tutorial8-depth]
 path = "../tutorial8-depth"
 
+[dependencies.tutorial9-model-loading]
+path = "../tutorial9-model-loading"
+
 [dependencies.image]
 version = "0.25"
 default-features = false
