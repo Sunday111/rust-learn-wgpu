@@ -32,7 +32,7 @@ struct Renderer<'a> {
     depth_texture: klgl::Texture,
     lines_draw_pass: LinesDrawPass,
     models_draw_pass: ModelsDrawPass,
-    display_depth_draw_pass: DisplayDepthDrawPass,
+    display_depth_draw_pass: Option<DisplayDepthDrawPass>,
 
     camera: Camera,
     camera_uniform: CameraUniform,
@@ -250,9 +250,6 @@ impl<'a> Renderer<'a> {
             depth_stencil_state,
         );
 
-        let depth_stencil_draw_pass =
-            DisplayDepthDrawPass::new(&device, surface_format, &depth_texture);
-
         Self {
             start_time: Instant::now(),
             window: window_box,
@@ -268,7 +265,7 @@ impl<'a> Renderer<'a> {
             last_stat_print: Instant::now(),
             lines_draw_pass,
             models_draw_pass,
-            display_depth_draw_pass: depth_stencil_draw_pass,
+            display_depth_draw_pass: None,
             camera,
             camera_uniform,
             camera_buffer,
@@ -377,8 +374,12 @@ impl<'a> Renderer<'a> {
                 self.config.height,
                 "depth_texture",
             );
-            self.display_depth_draw_pass
-                .on_resize(&self.device, &self.depth_texture);
+
+            match &mut self.display_depth_draw_pass {
+                Some(draw_pass) => draw_pass.on_resize(&self.device, &self.depth_texture),
+                _ => {}
+            }
+
             self.camera
                 .set_aspect(new_size.width as f32 / new_size.height as f32);
         }
@@ -473,25 +474,38 @@ impl<'a> Renderer<'a> {
         }
 
         if self.show_depth {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Display Depth Render Pass"),
-                color_attachments: &[
-                    // This is what @location(0) in the fragment shader targets
-                    Some(wgpu::RenderPassColorAttachment {
-                        view: &view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        },
-                    }),
-                ],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
+            if self.display_depth_draw_pass.is_none() {
+                self.display_depth_draw_pass = Some(DisplayDepthDrawPass::new(
+                    &self.device,
+                    self.config.format,
+                    &self.depth_texture,
+                ));
+            }
 
-            self.display_depth_draw_pass.render(&mut render_pass);
+            match &mut self.display_depth_draw_pass {
+                Some(draw_pass) => {
+                    let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("Display Depth Render Pass"),
+                        color_attachments: &[
+                            // This is what @location(0) in the fragment shader targets
+                            Some(wgpu::RenderPassColorAttachment {
+                                view: &view,
+                                resolve_target: None,
+                                ops: wgpu::Operations {
+                                    load: wgpu::LoadOp::Load,
+                                    store: wgpu::StoreOp::Store,
+                                },
+                            }),
+                        ],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
+
+                    draw_pass.render(&mut render_pass);
+                }
+                _ => {}
+            }
         }
 
         self.queue.submit(iter::once(encoder.finish()));
