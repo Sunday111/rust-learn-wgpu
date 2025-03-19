@@ -2,30 +2,9 @@ use cgmath::{Deg, Transform};
 use klgl::Rotator;
 use wgpu::util::DeviceExt;
 
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct Vertex {
-    pub position: [f32; 3],
-    pub color: [f32; 3],
-    pub tex_coords: [f32; 2],
-}
+use crate::model::{ModelVertex, Vertex};
 
-impl Vertex {
-    const ATTRIBS: [wgpu::VertexAttribute; 3] =
-        wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2];
-
-    fn layout() -> wgpu::VertexBufferLayout<'static> {
-        use std::mem;
-
-        wgpu::VertexBufferLayout {
-            array_stride: mem::size_of::<Self>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &Self::ATTRIBS,
-        }
-    }
-}
-
-fn transform_model(vertices: &mut [Vertex]) {
+fn transform_model(vertices: &mut [ModelVertex]) {
     let rm = Rotator {
         yaw: Deg(0.0),
         pitch: Deg(0.0),
@@ -38,51 +17,51 @@ fn transform_model(vertices: &mut [Vertex]) {
     }
 }
 
-const TRIANGLE_VERTICES: [Vertex; 3] = [
-    Vertex {
+const TRIANGLE_VERTICES: [ModelVertex; 3] = [
+    ModelVertex {
         position: [0.0, 0.5, 0.0],
-        color: [1.0, 0.0, 0.0],
         tex_coords: [0.5, 0.0],
+        normal: [1.0, 0.0, 0.0],
     },
-    Vertex {
+    ModelVertex {
         position: [-0.5, -0.5, 0.0],
-        color: [0.0, 1.0, 0.0],
         tex_coords: [0.0, 1.0],
+        normal: [0.0, 1.0, 0.0],
     },
-    Vertex {
+    ModelVertex {
         position: [0.5, -0.5, 0.0],
-        color: [0.0, 0.0, 1.0],
         tex_coords: [1.0, 1.0],
+        normal: [0.0, 0.0, 1.0],
     },
 ];
 
 const TRIANGLE_INDICES: &[u16] = &[0, 1, 2];
 
-const HEX_VERTICES: [Vertex; 5] = [
-    Vertex {
+const HEX_VERTICES: [ModelVertex; 5] = [
+    ModelVertex {
         position: [-0.0868241, 0.49240386, 0.0],
-        color: [1.0; 3],
         tex_coords: [0.4131759, 0.99240386],
+        normal: [0.0, 0.0, 1.0],
     }, // A
-    Vertex {
+    ModelVertex {
         position: [-0.49513406, 0.06958647, 0.0],
-        color: [1.0; 3],
         tex_coords: [0.0048659444, 0.56958647],
+        normal: [0.0, 0.0, 1.0],
     }, // B
-    Vertex {
+    ModelVertex {
         position: [-0.21918549, -0.44939706, 0.0],
-        color: [1.0; 3],
         tex_coords: [0.28081453, 0.05060294],
+        normal: [0.0, 0.0, 1.0],
     }, // C
-    Vertex {
+    ModelVertex {
         position: [0.35966998, -0.3473291, 0.0],
-        color: [1.0; 3],
         tex_coords: [0.85967, 0.1526709],
+        normal: [0.0, 0.0, 1.0],
     }, // D
-    Vertex {
+    ModelVertex {
         position: [0.44147372, 0.2347359, 0.0],
-        color: [1.0; 3],
         tex_coords: [0.9414737, 0.7347359],
+        normal: [0.0, 0.0, 1.0],
     }, // E
 ];
 
@@ -99,7 +78,7 @@ impl Instance {
         use std::mem;
         wgpu::VertexBufferLayout {
             array_stride: mem::size_of::<Instance>() as wgpu::BufferAddress,
-            // We need to switch from using a step mode of Vertex to Instance
+            // We need to switch from using a step mode of ModelVertex to Instance
             // This means that our shaders will only change to use the next
             // instance when the shader starts processing a new instance
             step_mode: wgpu::VertexStepMode::Instance,
@@ -109,7 +88,7 @@ impl Instance {
                 wgpu::VertexAttribute {
                     offset: 0,
                     // While our vertex shader only uses locations 0, and 1 now, in later tutorials, we'll
-                    // be using 2, 3, and 4, for Vertex. We'll start at slot 5, not conflict with them later
+                    // be using 2, 3, and 4, for ModelVertex. We'll start at slot 5, not conflict with them later
                     shader_location: 5,
                     format: wgpu::VertexFormat::Float32x4,
                 },
@@ -194,11 +173,11 @@ impl ModelsDrawPass {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
-        let mut tri_vert: [Vertex; 3] = TRIANGLE_VERTICES.into();
+        let mut tri_vert: [ModelVertex; 3] = TRIANGLE_VERTICES.into();
         transform_model(&mut tri_vert);
 
         let model_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex Buffer"),
+            label: Some("ModelVertex Buffer"),
             contents: bytemuck::cast_slice(&tri_vert),
             usage: wgpu::BufferUsages::VERTEX,
         });
@@ -315,7 +294,7 @@ impl ModelsDrawPass {
     ) -> wgpu::RenderPipeline {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Model Shader"),
-            source: wgpu::ShaderSource::Wgsl(tutorial_content::TUTORIAL_7_SHADER.into()),
+            source: wgpu::ShaderSource::Wgsl(tutorial_content::TUTORIAL_9_SHADER.into()),
         });
 
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -330,7 +309,7 @@ impl ModelsDrawPass {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_main"),
-                buffers: &[Vertex::layout(), Instance::layout()],
+                buffers: &[ModelVertex::layout(), Instance::layout()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -369,18 +348,18 @@ impl ModelsDrawPass {
     pub fn swap_model(&mut self, device: &wgpu::Device) {
         let (vertices, indices) = {
             if self.num_indices == TRIANGLE_INDICES.len() as u32 {
-                let mut hex_vert: [Vertex; 5] = HEX_VERTICES.into();
+                let mut hex_vert: [ModelVertex; 5] = HEX_VERTICES.into();
                 transform_model(&mut hex_vert);
                 (hex_vert.to_vec(), HEX_INDICES)
             } else {
-                let mut tri_vert: [Vertex; 3] = TRIANGLE_VERTICES.into();
+                let mut tri_vert: [ModelVertex; 3] = TRIANGLE_VERTICES.into();
                 transform_model(&mut tri_vert);
                 (tri_vert.to_vec(), TRIANGLE_INDICES)
             }
         };
 
         self.vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex Buffer"),
+            label: Some("ModelVertex Buffer"),
             contents: bytemuck::cast_slice(&vertices),
             usage: wgpu::BufferUsages::VERTEX,
         });

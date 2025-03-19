@@ -6,6 +6,7 @@ use winit::event_loop::{ControlFlow, EventLoop};
 mod app;
 mod display_depth_draw_pass;
 mod lines_draw_pass;
+mod model;
 mod models_draw_pass;
 
 pub async fn run() {
