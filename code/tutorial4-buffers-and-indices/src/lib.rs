@@ -223,7 +223,7 @@ impl<'a> Renderer<'a> {
 
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Shader"),
-            source: wgpu::ShaderSource::Wgsl(tutorial_content::TUTORIAL_4_SHADER.into()),
+            source: wgpu::ShaderSource::Wgsl(tutorial_embedded_content::TUTORIAL_4_SHADER.into()),
         });
 
         let config = wgpu::SurfaceConfiguration {

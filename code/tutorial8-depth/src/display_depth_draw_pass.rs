@@ -93,7 +93,7 @@ impl DisplayDepthDrawPass {
     ) -> wgpu::RenderPipeline {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("depth_pass.shader"),
-            source: wgpu::ShaderSource::Wgsl(tutorial_content::FULL_SCREEN_TEXTURE_SHADER.into()),
+            source: wgpu::ShaderSource::Wgsl(tutorial_embedded_content::FULL_SCREEN_TEXTURE_SHADER.into()),
         });
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("depth_pass.render_pipeline"),

@@ -58,7 +58,9 @@ impl LinesDrawPass {
     ) -> wgpu::RenderPipeline {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Solid Color Shader"),
-            source: wgpu::ShaderSource::Wgsl(tutorial_content::COLORED_VERTICES_SHADER.into()),
+            source: wgpu::ShaderSource::Wgsl(
+                tutorial_embedded_content::COLORED_VERTICES_SHADER.into(),
+            ),
         });
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Lines Render Pipeline"),

@@ -363,7 +363,9 @@ impl<'a> Renderer<'a> {
 
         let colored_vertices_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Solid Color Shader"),
-            source: wgpu::ShaderSource::Wgsl(tutorial_content::COLORED_VERTICES_SHADER.into()),
+            source: wgpu::ShaderSource::Wgsl(
+                tutorial_embedded_content::COLORED_VERTICES_SHADER.into(),
+            ),
         });
 
         let lines_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -412,7 +414,7 @@ impl<'a> Renderer<'a> {
 
         let models_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Model Shader"),
-            source: wgpu::ShaderSource::Wgsl(tutorial_content::TUTORIAL_6_SHADER.into()),
+            source: wgpu::ShaderSource::Wgsl(tutorial_embedded_content::TUTORIAL_6_SHADER.into()),
         });
 
         let models_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -485,7 +487,7 @@ impl<'a> Renderer<'a> {
                     let diffuse_texture = klgl::Texture::from_bytes(
                         &device,
                         &queue,
-                        tutorial_content::HAPPY_TREE_PNG,
+                        tutorial_embedded_content::HAPPY_TREE_PNG,
                         "happy-tree.png",
                     )
                     .unwrap();
@@ -514,7 +516,7 @@ impl<'a> Renderer<'a> {
                     let diffuse_texture = klgl::Texture::from_bytes(
                         &device,
                         &queue,
-                        tutorial_content::ILLUMINATI_PNG,
+                        tutorial_embedded_content::ILLUMINATI_PNG,
                         "illuminati.png",
                     )
                     .unwrap();

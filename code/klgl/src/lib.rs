@@ -2,6 +2,7 @@ mod camera;
 mod camera_controller;
 mod common;
 mod fps_counter;
+pub mod resources;
 mod rotator;
 mod texture;
 

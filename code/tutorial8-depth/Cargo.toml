@@ -24,8 +24,8 @@ cgmath = "0.18"
 [dependencies.klgl]
 path = "../klgl"
 
-[dependencies.tutorial-content]
-path = "../tutorial-content"
+[dependencies.tutorial-embedded-content]
+path = "../tutorial-embedded-content"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = "0.1.7"

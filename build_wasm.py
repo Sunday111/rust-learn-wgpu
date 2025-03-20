@@ -15,6 +15,7 @@ def build_wasm_target(src_path:Path, out_dir:Path):
             *("--out-name", "wasm-package"),
             "--no-typescript",  # to not generate ts files
             "--no-pack",  # do not generate package.json
+            "--dev",
         ]
     )
 
@@ -24,8 +25,13 @@ def build_wasm_target(src_path:Path, out_dir:Path):
 def main():
     shutil.rmtree(WASM_BUILD_ROOT, ignore_errors=True)
     build_wasm_target(ROOT_DIR / 'code/wasm-target', WASM_BUILD_ROOT)
+
+    # copy html pages
     for html_path in (ROOT_DIR / 'html').glob('*'):
         shutil.copyfile(html_path, WASM_BUILD_ROOT / html_path.name)
+
+    # copy dynamically loaded resources
+    shutil.copytree(ROOT_DIR / 'code/klgl/res', WASM_BUILD_ROOT / 'res')
 
 
 if __name__ == "__main__":

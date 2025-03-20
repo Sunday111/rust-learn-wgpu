@@ -31,8 +31,8 @@ web-sys = { version = "0.3", features = [
 [dependencies.klgl]
 path = "../klgl"
 
-[dependencies.tutorial-content]
-path = "../tutorial-content"
+[dependencies.tutorial-embedded-content]
+path = "../tutorial-embedded-content"
 
 [[bin]]
 name = "tutorial2-surface"

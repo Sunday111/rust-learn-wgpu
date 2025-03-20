@@ -1,5 +1,6 @@
 use cgmath::{Deg, Transform};
 use klgl::Rotator;
+use tutorial_embedded_content::ILLUMINATI_PNG;
 use wgpu::util::DeviceExt;
 
 use crate::model::{ModelVertex, Vertex};
@@ -112,24 +113,66 @@ impl Instance {
     }
 }
 
+const PLACEHOLDER_TEXTURE: &[u8] = ILLUMINATI_PNG;
+
+pub struct TextureData {
+    path: String,
+    texture: klgl::Texture,
+    bind_group: wgpu::BindGroup,
+}
+
 pub struct ModelsDrawPass {
+    pub receiver: async_channel::Receiver<(String, Vec<u8>)>,
     pub pipeline: wgpu::RenderPipeline,
     pub vertex_buffer: wgpu::Buffer,
     pub index_buffer: wgpu::Buffer,
     instances: Vec<Instance>,
     pub instances_buffer: wgpu::Buffer,
     pub num_indices: u32,
-    pub textures: [wgpu::BindGroup; 2],
+    texture_bind_group_layout: wgpu::BindGroupLayout,
+    pub textures: Vec<TextureData>,
     pub active_texture: u32,
 }
 
 impl ModelsDrawPass {
-    pub fn new(
+    fn make_texture_data(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        data: &[u8],
+        path: String,
+        bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> TextureData {
+        let texture = klgl::Texture::from_bytes(&device, &queue, data, &path).unwrap();
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&texture.sampler),
+                },
+            ],
+            label: Some(&path),
+        });
+
+        TextureData {
+            path: path,
+            texture: texture,
+            bind_group: bind_group,
+        }
+    }
+
+    pub async fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         camera_bind_group_layout: &wgpu::BindGroupLayout,
         surface_format: wgpu::TextureFormat,
         depth_stencil_state: Option<wgpu::DepthStencilState>,
+        sender: async_channel::Sender<(String, Vec<u8>)>,
+        receiver: async_channel::Receiver<(String, Vec<u8>)>,
     ) -> Self {
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -155,6 +198,53 @@ impl ModelsDrawPass {
                 ],
                 label: Some("model_draw_pass_texture_bind_group_layout"),
             });
+
+        // let textures_paths: Vec<String> = (1..=99).map(|i| format!("{:06}.jpg", i)).collect();
+        let textures_paths: Vec<String> = vec!["happy-tree.png".into(), "illuminati.png".into()];
+
+        let mut textures: Vec<TextureData> = vec![];
+
+        for texture_path in &textures_paths {
+            textures.push(Self::make_texture_data(
+                device,
+                queue,
+                PLACEHOLDER_TEXTURE,
+                texture_path.into(),
+                &texture_bind_group_layout,
+            ));
+
+            // Load real textures asynchronously
+            {
+                let sender_clone = sender.clone();
+                let path_clone: String = texture_path.clone();
+                let loader_fn = async move {
+                    match klgl::resources::load_binary(&path_clone).await {
+                        Ok(data) => {
+                            log::info!("Received: \"{}\"", path_clone);
+                            let _ = sender_clone.send((path_clone, data)).await;
+                        }
+                        Err(err) => {
+                            log::error!("Failed to load \"{}\". Reason: \"{}\"", path_clone, err);
+                        }
+                    };
+                };
+
+                cfg_if::cfg_if! {
+                    if #[cfg(target_arch = "wasm32")] {
+                        wasm_bindgen_futures::spawn_local(loader_fn);
+                    } else {
+                        async_std::task::spawn(loader_fn);
+                    }
+                }
+            }
+        }
+
+        let num_indices = TRIANGLE_INDICES.len();
+        let model_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Index Buffer"),
+            contents: bytemuck::cast_slice(TRIANGLE_INDICES),
+            usage: wgpu::BufferUsages::INDEX,
+        });
 
         let models_pipeline = ModelsDrawPass::create_render_pipeline(
             &device,
@@ -182,72 +272,15 @@ impl ModelsDrawPass {
             usage: wgpu::BufferUsages::VERTEX,
         });
 
-        let num_indices = TRIANGLE_INDICES.len();
-        let model_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Index Buffer"),
-            contents: bytemuck::cast_slice(TRIANGLE_INDICES),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-
-        let textures = {
-            [
-                {
-                    let diffuse_texture = klgl::Texture::from_bytes(
-                        &device,
-                        &queue,
-                        tutorial_content::HAPPY_TREE_PNG,
-                        "happy-tree.png",
-                    )
-                    .unwrap();
-                    device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        layout: &texture_bind_group_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-                            },
-                        ],
-                        label: Some("happy tree bind group"),
-                    })
-                },
-                {
-                    let diffuse_texture = klgl::Texture::from_bytes(
-                        &device,
-                        &queue,
-                        tutorial_content::ILLUMINATI_PNG,
-                        "illuminati.png",
-                    )
-                    .unwrap();
-
-                    device.create_bind_group(&wgpu::BindGroupDescriptor {
-                        layout: &texture_bind_group_layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-                            },
-                        ],
-                        label: Some("illuminati bind group"),
-                    })
-                },
-            ]
-        };
-
         Self {
+            receiver: receiver,
             pipeline: models_pipeline,
             vertex_buffer: model_vertex_buffer,
             index_buffer: model_index_buffer,
             instances: model_instances,
             instances_buffer: model_instances_buffer,
             num_indices: num_indices as u32,
+            texture_bind_group_layout,
             textures,
             active_texture: 0,
         }
@@ -276,7 +309,27 @@ impl ModelsDrawPass {
         }));
     }
 
-    pub fn update_model_instances(&mut self, queue: &wgpu::Queue, angle: Deg<f32>) {
+    pub fn update(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, angle: Deg<f32>) {
+        while let Ok((texture_path, data)) = self.receiver.try_recv() {
+            match self.textures.iter().position(|x| x.path == texture_path) {
+                Some(index) => {
+                    self.textures[index] = Self::make_texture_data(
+                        &device,
+                        queue,
+                        &data,
+                        texture_path,
+                        &self.texture_bind_group_layout,
+                    );
+                }
+                None => {
+                    log::error!(
+                        "Receiver got texture data for \"{}\", but couldn't find it in textures list",
+                        texture_path
+                    );
+                }
+            }
+        }
+
         Self::compute_model_instances(&mut self.instances, angle);
         queue.write_buffer(
             &self.instances_buffer,
@@ -294,7 +347,7 @@ impl ModelsDrawPass {
     ) -> wgpu::RenderPipeline {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Model Shader"),
-            source: wgpu::ShaderSource::Wgsl(tutorial_content::TUTORIAL_9_SHADER.into()),
+            source: wgpu::ShaderSource::Wgsl(tutorial_embedded_content::TUTORIAL_9_SHADER.into()),
         });
 
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -374,12 +427,13 @@ impl ModelsDrawPass {
     }
 
     pub fn set_active_texture(&mut self, index: u32) {
-        self.active_texture = index.min(1);
+        self.active_texture = index.min((self.textures.len() - 1) as u32);
     }
 
     pub fn render(&self, render_pass: &mut wgpu::RenderPass, camera_bind_group: &wgpu::BindGroup) {
+        let texture = &self.textures[self.active_texture as usize];
         render_pass.set_pipeline(&self.pipeline);
-        render_pass.set_bind_group(0, &self.textures[self.active_texture as usize], &[]);
+        render_pass.set_bind_group(0, &texture.bind_group, &[]);
         render_pass.set_bind_group(1, camera_bind_group, &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         render_pass.set_vertex_buffer(1, self.instances_buffer.slice(..));

@@ -20,22 +20,26 @@ web-time = "1.1"
 bytemuck = "1.22"
 anyhow = "1.0"
 cgmath = "0.18"
+async-channel = "2.3.1"
+async-std = "1.13.1"
 
 [dependencies.klgl]
 path = "../klgl"
 
-[dependencies.tutorial-content]
-path = "../tutorial-content"
+[dependencies.tutorial-embedded-content]
+path = "../tutorial-embedded-content"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 console_error_panic_hook = "0.1.7"
 console_log = "1.0"
+wasm-bindgen-futures = "0.4.50"
 wgpu = { version = "24.0", features = ["webgl"]}
 web-sys = { version = "0.3", features = [
     "Document",
     "Window",
     "Element",
 ]}
+
 
 [[bin]]
 name = "tutorial9-model-loading"

@@ -17,6 +17,9 @@ use std::{iter, pin::Pin};
 use web_time::Instant;
 
 struct Renderer<'a> {
+    sender: async_channel::Sender<(String, Vec<u8>)>,
+    receiver: async_channel::Receiver<(String, Vec<u8>)>,
+
     start_time: Instant,
     window: Pin<Box<Window>>,
     surface: wgpu::Surface<'a>,
@@ -48,8 +51,15 @@ pub struct App<'a> {
 }
 
 impl<'a> App<'a> {
-    pub fn new() -> Self {
-        Self { renderer: None }
+    pub async fn new() -> Self {
+        Self {
+            renderer: None,
+            // some_texture: Some(
+            //     klgl::resources::load_binary("models/cube/cube-diffuse.jpg")
+            //         .await
+            //         .unwrap(),
+            // ),
+        }
     }
 }
 
@@ -235,13 +245,18 @@ impl<'a> Renderer<'a> {
             bias: wgpu::DepthBiasState::default(),
         });
 
+        let (sender, receiver) = async_channel::unbounded::<(String, Vec<u8>)>();
+
         let models_draw_pass = ModelsDrawPass::new(
             &device,
             &queue,
             &camera_bind_group_layout,
             config.format,
             depth_stencil_state.clone(),
-        );
+            sender.clone(),
+            receiver.clone(),
+        )
+        .await;
 
         let lines_draw_pass = LinesDrawPass::new(
             &device,
@@ -251,6 +266,8 @@ impl<'a> Renderer<'a> {
         );
 
         Self {
+            sender,
+            receiver,
             start_time: Instant::now(),
             window: window_box,
             surface,
@@ -412,7 +429,8 @@ impl<'a> Renderer<'a> {
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
 
-        self.models_draw_pass.update_model_instances(
+        self.models_draw_pass.update(
+            &self.device,
             &self.queue,
             Deg(90.0 + 80.0 * (dur_since_start.as_secs_f32() * 2.0).sin()),
         );
