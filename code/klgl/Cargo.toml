@@ -26,6 +26,8 @@ bytemuck = "1.22"
 anyhow = "1.0"
 cgmath = "0.18"
 num-traits = "^0.2"
+async-channel = "2.3.1"
+async-std = "1.13.1"
 
 [dependencies.image]
 version = "0.25"

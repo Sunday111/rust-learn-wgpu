@@ -1387,6 +1387,8 @@ name = "klgl"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-channel 2.3.1",
+ "async-std",
  "bytemuck",
  "cfg-if",
  "cgmath",

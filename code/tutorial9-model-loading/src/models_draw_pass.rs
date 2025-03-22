@@ -273,7 +273,7 @@ impl ModelsDrawPass {
         });
 
         Self {
-            receiver: receiver,
+            receiver,
             pipeline: models_pipeline,
             vertex_buffer: model_vertex_buffer,
             index_buffer: model_index_buffer,
