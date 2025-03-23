@@ -122,19 +122,23 @@ pub struct TextureData {
 }
 
 pub struct ModelsDrawPass {
-    pub receiver: async_channel::Receiver<(String, Vec<u8>)>,
-    pub pipeline: wgpu::RenderPipeline,
-    pub vertex_buffer: wgpu::Buffer,
-    pub index_buffer: wgpu::Buffer,
+    receiver: async_channel::Receiver<(String, Vec<u8>)>,
+    pipeline: wgpu::RenderPipeline,
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
     instances: Vec<Instance>,
-    pub instances_buffer: wgpu::Buffer,
-    pub num_indices: u32,
+    instances_buffer: wgpu::Buffer,
+    num_indices: u32,
     texture_bind_group_layout: wgpu::BindGroupLayout,
-    pub textures: Vec<TextureData>,
-    pub active_texture: u32,
+    textures: Vec<TextureData>,
+    active_texture: u32,
 }
 
 impl ModelsDrawPass {
+    pub fn num_textures(&self) -> u32 {
+        return self.textures.len() as u32;
+    }
+
     fn make_texture_data(
         device: &wgpu::Device,
         queue: &wgpu::Queue,

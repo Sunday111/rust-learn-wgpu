@@ -417,8 +417,8 @@ impl<'a> Renderer<'a> {
 
         let dur_since_start = now.duration_since(self.start_time);
         self.models_draw_pass.set_active_texture(
-            (((dur_since_start.as_secs_f64() / 3.0) as u32)
-                % (self.models_draw_pass.textures.len() as u32)) as u32,
+            ((dur_since_start.as_secs_f64() / 3.0) as u32)
+                % self.models_draw_pass.num_textures() as u32,
         );
 
         self.camera_controller.update_camera(&mut self.camera);
