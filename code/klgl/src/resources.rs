@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use cfg_if::cfg_if;
 
+use crate::settings;
+
 #[cfg(target_arch = "wasm32")]
 fn format_url(file_name: &str) -> reqwest::Url {
     let window = web_sys::window().unwrap();
@@ -10,8 +12,14 @@ fn format_url(file_name: &str) -> reqwest::Url {
     if !origin.ends_with("res") {
         origin = format!("{}/res", origin);
     }
-    let base = reqwest::Url::parse(&format!("{}/", origin,)).unwrap();
-    base.join(file_name).unwrap()
+    let mut base = reqwest::Url::parse(&format!("{}/", origin,)).unwrap();
+    base = base.join(file_name).unwrap();
+
+    if settings::DEPLOYMENT_SUB_PATH.len() > 0 {
+        base = base.join(settings::DEPLOYMENT_SUB_PATH).unwrap();
+    }
+
+    base
 }
 
 pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
@@ -26,6 +34,7 @@ pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
             let path = std::path::Path::new(env!("OUT_DIR"))
                 .join("res")
                 .join(file_name);
+
             let txt = std::fs::read_to_string(path)?;
         }
     }

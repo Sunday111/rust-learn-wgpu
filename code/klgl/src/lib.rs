@@ -4,6 +4,7 @@ mod common;
 mod fps_counter;
 pub mod resources;
 mod rotator;
+mod settings;
 mod texture;
 
 pub use camera::{Camera, CameraUniform};
