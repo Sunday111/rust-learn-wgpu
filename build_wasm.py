@@ -15,7 +15,7 @@ def build_wasm_target(src_path:Path, out_dir:Path):
             *("--out-name", "wasm-package"),
             "--no-typescript",  # to not generate ts files
             "--no-pack",  # do not generate package.json
-            "--dev",
+            # "--dev",
         ]
     )
 
