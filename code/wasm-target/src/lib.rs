@@ -1,9 +1,8 @@
-#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::wasm_bindgen;
 
 macro_rules! wasm_bindgen_async_fn {
     ($fn_name:ident, $target:ident) => {
-        #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+        #[wasm_bindgen]
         pub async fn $fn_name() {
             ($target::run()).await;
         }
