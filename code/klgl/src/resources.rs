@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
 use cfg_if::cfg_if;
 
@@ -52,15 +52,30 @@ pub async fn load_binary(file_name: &str) -> anyhow::Result<Vec<u8>> {
 }
 
 struct PendingFile {
+    id: u32,
     // it's an array because multiple places might be waiting for the same file
     callbacks: Vec<Box<dyn FnOnce(&Rc<FileData>)>>,
 }
 
 #[derive(Clone, Debug)]
 pub struct FileData {
-    data: Vec<u8>,
+    pub id: u32,
+    pub data: Vec<u8>,
 }
 
+impl std::hash::Hash for FileData {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+impl std::hash::Hash for PendingFile {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.id.hash(state);
+    }
+}
+
+#[derive(Clone)]
 pub struct FileLoader {
     inner: Rc<RefCell<FileLoaderInner>>,
 }
@@ -69,8 +84,32 @@ pub struct FileLoaderInner {
     sender: async_channel::Sender<(String, Vec<u8>)>,
     receiver: async_channel::Receiver<(String, Vec<u8>)>,
 
-    ready_resources: std::collections::HashMap<String, Rc<FileData>>,
-    pending_resources: std::collections::HashMap<String, Rc<RefCell<PendingFile>>>,
+    name_id_map: bimap::BiHashMap<String, u32>,
+    ready_resources: std::collections::HashMap<u32, Rc<FileData>>,
+    pending_resources: std::collections::HashMap<u32, Rc<RefCell<PendingFile>>>,
+
+    next_id: u32,
+}
+
+impl FileLoaderInner {
+    fn find_id(&self, path: &str) -> Option<u32> {
+        match self.name_id_map.get_by_left(path) {
+            Some(id) => Some(*id),
+            None => None,
+        }
+    }
+
+    fn find_or_add_id(&mut self, path: &str) -> u32 {
+        match self.find_id(path) {
+            Some(id) => id,
+            None => {
+                let id = self.next_id;
+                self.next_id += 1;
+                self.name_id_map.insert(path.into(), id);
+                id
+            }
+        }
+    }
 }
 
 impl FileLoader {
@@ -80,17 +119,23 @@ impl FileLoader {
             inner: Rc::new(RefCell::new(FileLoaderInner {
                 sender,
                 receiver,
-                ready_resources: HashMap::new(),
-                pending_resources: HashMap::new(),
+                name_id_map: bimap::BiHashMap::new(),
+                ready_resources: std::collections::HashMap::new(),
+                pending_resources: std::collections::HashMap::new(),
+                next_id: 0,
             })),
         }
     }
 
     pub fn try_get_resource(&self, path: &str) -> Option<Rc<FileData>> {
         let inner = self.inner.borrow_mut();
-        match inner.ready_resources.get(path) {
-            Some(file_data) => Some(file_data.clone()),
-            _ => None,
+
+        match inner.name_id_map.get_by_left(path) {
+            Some(id) => match inner.ready_resources.get(id) {
+                Some(resource) => Some(resource.clone()),
+                None => None,
+            },
+            None => None,
         }
     }
 
@@ -100,18 +145,21 @@ impl FileLoader {
     {
         let mut inner = self.inner.borrow_mut();
 
-        if let Some(file_data) = inner.ready_resources.get(path) {
+        let id = inner.find_or_add_id(path);
+
+        if let Some(file_data) = inner.ready_resources.get(&id) {
             return callback(file_data);
         }
 
-        if let Some(pending) = inner.pending_resources.get(path) {
+        if let Some(pending) = inner.pending_resources.get(&id) {
             pending.borrow_mut().callbacks.push(Box::new(callback));
             return;
         }
 
         inner.pending_resources.insert(
-            path.into(),
+            id,
             Rc::new(RefCell::new(PendingFile {
+                id,
                 callbacks: vec![Box::new(callback)],
             })),
         );
@@ -142,7 +190,8 @@ impl FileLoader {
     pub fn poll(&mut self) {
         let mut inner = self.inner.borrow_mut();
         while let Ok((path, data)) = inner.receiver.try_recv() {
-            let removed_entry = inner.pending_resources.remove_entry(&path);
+            let id = inner.find_or_add_id(&path);
+            let removed_entry = inner.pending_resources.remove_entry(&id);
 
             if let None = removed_entry {
                 log::error!(
@@ -151,7 +200,7 @@ impl FileLoader {
                 );
             }
 
-            match inner.ready_resources.get(&path) {
+            match inner.ready_resources.get(&id) {
                 Some(_) => {
                     log::error!("Got data for \"{}\" but data was already cached", &path);
                 }
@@ -159,7 +208,7 @@ impl FileLoader {
                     // Add to ready resources
                     inner
                         .ready_resources
-                        .insert(path, Rc::new(FileData { data }));
+                        .insert(id, Rc::new(FileData { id, data }));
                 }
             }
 
@@ -181,6 +230,11 @@ impl FileLoader {
         }
     }
 }
+
+// struct FileLoaderEndpoint {
+//     loader: FileLoader,
+//     receiver: async_channel::Receiver<Rc<FileData>>,
+// }
 
 #[cfg(test)]
 mod tests {
