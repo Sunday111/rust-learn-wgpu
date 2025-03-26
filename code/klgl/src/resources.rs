@@ -1,6 +1,6 @@
-use std::{cell::RefCell, rc::Rc};
-
 use cfg_if::cfg_if;
+use derive_more::Display;
+use std::{cell::RefCell, rc::Rc};
 
 #[cfg(target_arch = "wasm32")]
 fn format_url(file_name: &str) -> reqwest::Url {
@@ -51,28 +51,22 @@ pub async fn load_binary(file_name: &str) -> anyhow::Result<Vec<u8>> {
     Ok(data)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display)]
+pub struct FileId(u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display)]
+pub struct EndpointId(u32);
+
 struct PendingFile {
-    id: u32,
+    id: FileId,
     // it's an array because multiple places might be waiting for the same file
     callbacks: Vec<Box<dyn FnOnce(&Rc<FileData>)>>,
 }
 
 #[derive(Clone, Debug)]
 pub struct FileData {
-    pub id: u32,
+    pub id: FileId,
     pub data: Vec<u8>,
-}
-
-impl std::hash::Hash for FileData {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
-}
-
-impl std::hash::Hash for PendingFile {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
 }
 
 #[derive(Clone)]
@@ -84,27 +78,27 @@ pub struct FileLoaderInner {
     sender: async_channel::Sender<(String, Vec<u8>)>,
     receiver: async_channel::Receiver<(String, Vec<u8>)>,
 
-    name_id_map: bimap::BiHashMap<String, u32>,
-    ready_resources: std::collections::HashMap<u32, Rc<FileData>>,
-    pending_resources: std::collections::HashMap<u32, Rc<RefCell<PendingFile>>>,
+    name_id_map: bimap::BiHashMap<String, FileId>,
+    ready_resources: std::collections::HashMap<FileId, Rc<FileData>>,
+    pending_resources: std::collections::HashMap<FileId, Rc<RefCell<PendingFile>>>,
 
-    next_id: u32,
+    next_id: FileId,
 }
 
 impl FileLoaderInner {
-    fn find_id(&self, path: &str) -> Option<u32> {
+    fn find_id(&self, path: &str) -> Option<FileId> {
         match self.name_id_map.get_by_left(path) {
             Some(id) => Some(*id),
             None => None,
         }
     }
 
-    fn find_or_add_id(&mut self, path: &str) -> u32 {
+    fn find_or_add_id(&mut self, path: &str) -> FileId {
         match self.find_id(path) {
             Some(id) => id,
             None => {
                 let id = self.next_id;
-                self.next_id += 1;
+                self.next_id = FileId(self.next_id.0 + 1);
                 self.name_id_map.insert(path.into(), id);
                 id
             }
@@ -122,7 +116,7 @@ impl FileLoader {
                 name_id_map: bimap::BiHashMap::new(),
                 ready_resources: std::collections::HashMap::new(),
                 pending_resources: std::collections::HashMap::new(),
-                next_id: 0,
+                next_id: FileId(0),
             })),
         }
     }
@@ -139,7 +133,7 @@ impl FileLoader {
         }
     }
 
-    pub fn get_or_request_resource<Callback>(&mut self, path: &str, callback: Callback)
+    pub fn get_or_request<Callback>(&mut self, path: &str, callback: Callback)
     where
         Callback: 'static + FnOnce(&Rc<FileData>),
     {
@@ -236,6 +230,10 @@ impl FileLoader {
 //     receiver: async_channel::Receiver<Rc<FileData>>,
 // }
 
+// impl FileLoaderEndpoint {
+
+// }
+
 #[cfg(test)]
 mod tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
@@ -244,7 +242,7 @@ mod tests {
     #[test]
     fn test_add() {
         let mut loader = FileLoader::new();
-        loader.get_or_request_resource("why hello", |x| {
+        loader.get_or_request("why hello", |x| {
             println!("ready: {:?}", x);
         });
         loader.poll();
