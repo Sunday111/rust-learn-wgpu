@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use cfg_if::cfg_if;
 
@@ -51,124 +51,131 @@ pub async fn load_binary(file_name: &str) -> anyhow::Result<Vec<u8>> {
     Ok(data)
 }
 
-struct PendingResource {
-    // it's an array because multiple places might be waiting for the same resouce
-    callbacks: Vec<Box<dyn FnOnce(&[u8])>>,
+struct PendingFile {
+    // it's an array because multiple places might be waiting for the same file
+    callbacks: Vec<Box<dyn FnOnce(&Rc<FileData>)>>,
 }
 
-struct CachedResource {
+#[derive(Clone, Debug)]
+pub struct FileData {
     data: Vec<u8>,
 }
 
-enum ResourceState {
-    Pending(PendingResource),
-    Cached(CachedResource),
+pub struct FileLoader {
+    inner: Rc<RefCell<FileLoaderInner>>,
 }
 
-pub struct ResourceLoader {
+pub struct FileLoaderInner {
     sender: async_channel::Sender<(String, Vec<u8>)>,
     receiver: async_channel::Receiver<(String, Vec<u8>)>,
-    resources: std::collections::HashMap<String, ResourceState>,
+
+    ready_resources: std::collections::HashMap<String, Rc<FileData>>,
+    pending_resources: std::collections::HashMap<String, Rc<RefCell<PendingFile>>>,
 }
 
-impl ResourceLoader {
+impl FileLoader {
     pub fn new() -> Self {
         let (sender, receiver) = async_channel::unbounded::<(String, Vec<u8>)>();
         Self {
-            sender,
-            receiver,
-            resources: HashMap::new(),
+            inner: Rc::new(RefCell::new(FileLoaderInner {
+                sender,
+                receiver,
+                ready_resources: HashMap::new(),
+                pending_resources: HashMap::new(),
+            })),
         }
     }
 
-    pub fn try_get_resource(&self, path: &str) -> Option<&[u8]> {
-        match self.resources.get(path) {
-            Some(state) => match state {
-                ResourceState::Cached(cached) => Some(&cached.data),
-                _ => None,
-            },
+    pub fn try_get_resource(&self, path: &str) -> Option<Rc<FileData>> {
+        let inner = self.inner.borrow_mut();
+        match inner.ready_resources.get(path) {
+            Some(file_data) => Some(file_data.clone()),
             _ => None,
         }
     }
 
     pub fn get_or_request_resource<Callback>(&mut self, path: &str, callback: Callback)
     where
-        Callback: 'static + FnOnce(&[u8]),
+        Callback: 'static + FnOnce(&Rc<FileData>),
     {
-        match self.resources.get_mut(path) {
-            Some(state) => match state {
-                ResourceState::Cached(cached) => {
-                    callback(&cached.data);
-                }
-                ResourceState::Pending(pending) => {
-                    pending.callbacks.push(Box::new(callback));
-                }
-            },
-            None => {
-                self.resources.insert(
-                    path.into(),
-                    ResourceState::Pending(PendingResource {
-                        callbacks: vec![Box::new(callback)],
-                    }),
-                );
+        let mut inner = self.inner.borrow_mut();
 
-                let sender_clone = self.sender.clone();
-                let path_clone: String = path.into();
-                let loader_fn = async move {
-                    match load_binary(&path_clone).await {
-                        Ok(data) => {
-                            log::info!("Received: \"{}\"", path_clone);
-                            let _ = sender_clone.send((path_clone, data)).await;
-                        }
-                        Err(err) => {
-                            log::error!("Failed to load \"{}\". Reason: \"{}\"", path_clone, err);
-                        }
-                    };
-                };
+        if let Some(file_data) = inner.ready_resources.get(path) {
+            return callback(file_data);
+        }
 
-                cfg_if::cfg_if! {
-                    if #[cfg(target_arch = "wasm32")] {
-                        wasm_bindgen_futures::spawn_local(loader_fn);
-                    } else {
-                        async_std::task::spawn(loader_fn);
-                    }
+        if let Some(pending) = inner.pending_resources.get(path) {
+            pending.borrow_mut().callbacks.push(Box::new(callback));
+            return;
+        }
+
+        inner.pending_resources.insert(
+            path.into(),
+            Rc::new(RefCell::new(PendingFile {
+                callbacks: vec![Box::new(callback)],
+            })),
+        );
+
+        let sender_clone = inner.sender.clone();
+        let path_clone: String = path.into();
+        let loader_fn = async move {
+            match load_binary(&path_clone).await {
+                Ok(data) => {
+                    log::info!("Received: \"{}\"", path_clone);
+                    let _ = sender_clone.send((path_clone, data)).await;
                 }
-            }
+                Err(err) => {
+                    log::error!("Failed to load \"{}\". Reason: \"{}\"", path_clone, err);
+                }
+            };
         };
+
+        cfg_if::cfg_if! {
+            if #[cfg(target_arch = "wasm32")] {
+                wasm_bindgen_futures::spawn_local(loader_fn);
+            } else {
+                async_std::task::spawn(loader_fn);
+            }
+        }
     }
 
     pub fn poll(&mut self) {
-        while let Ok((path, data)) = self.receiver.try_recv() {
-            match self.resources.remove_entry(&path) {
-                Some((removed_key, removed_value)) => {
-                    self.resources
-                        .insert(path, ResourceState::Cached(CachedResource { data: data }));
-                    match removed_value {
-                        ResourceState::Pending(pending) => {
-                            match self.resources.get(&removed_key).unwrap() {
-                                ResourceState::Cached(cached) => {
-                                    for callback in pending.callbacks {
-                                        callback(&cached.data);
-                                    }
-                                }
-                                _ => {
-                                    log::error!("Something went very wrong here.");
-                                }
-                            }
-                        }
-                        ResourceState::Cached(_) => {
-                            log::error!(
-                                "Receiver got data for \"{}\", but this resource is cached",
-                                removed_key
-                            );
-                        }
-                    }
+        let mut inner = self.inner.borrow_mut();
+        while let Ok((path, data)) = inner.receiver.try_recv() {
+            let removed_entry = inner.pending_resources.remove_entry(&path);
+
+            if let None = removed_entry {
+                log::error!(
+                    "Receiver got data for \"{}\", but did not expect that",
+                    &path
+                );
+            }
+
+            match inner.ready_resources.get(&path) {
+                Some(_) => {
+                    log::error!("Got data for \"{}\" but data was already cached", &path);
                 }
                 None => {
-                    log::error!(
-                        "Receiver got data for \"{}\", but did not expect that",
-                        path
-                    );
+                    // Add to ready resources
+                    inner
+                        .ready_resources
+                        .insert(path, Rc::new(FileData { data }));
+                }
+            }
+
+            if let Some((removed_key, pending)) = removed_entry {
+                match inner.ready_resources.get(&removed_key) {
+                    Some(file_data) => {
+                        for callback in std::mem::take(&mut pending.borrow_mut().callbacks) {
+                            callback(&file_data);
+                        }
+                    }
+                    _ => {
+                        log::error!(
+                            "Something went very wrong here: succesfully inserted file data for \"{}\" but failed to find it a few calls later",
+                            removed_key
+                        );
+                    }
                 }
             }
         }
@@ -182,9 +189,10 @@ mod tests {
 
     #[test]
     fn test_add() {
-        let mut loader = ResourceLoader::new();
+        let mut loader = FileLoader::new();
         loader.get_or_request_resource("why hello", |x| {
             println!("ready: {:?}", x);
         });
+        loader.poll();
     }
 }

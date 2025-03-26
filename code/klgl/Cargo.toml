@@ -28,6 +28,7 @@ cgmath = "0.18"
 num-traits = "^0.2"
 async-channel = "2.3.1"
 async-std = "1.13.1"
+tobj = { version = "3.2", default-features = false, features = ["async"]}
 
 [dependencies.image]
 version = "0.25"
