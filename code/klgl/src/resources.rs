@@ -58,7 +58,7 @@ pub struct EndpointId(u32);
 
 struct PendingFile {
     // it's an array because multiple places might be waiting for the same file
-    callbacks: Vec<Box<dyn FnOnce(&Rc<FileData>)>>,
+    callbacks: Vec<Box<dyn FnOnce(&FileDataHandle)>>,
 }
 
 #[derive(Clone, Debug)]
@@ -66,6 +66,12 @@ pub struct FileData {
     pub id: FileId,
     pub data: Vec<u8>,
 }
+
+#[cfg(target_arch = "wasm32")]
+pub type FileDataHandle = Rc<FileData>; // Use `Rc<T>` in WebAssembly
+
+#[cfg(not(target_arch = "wasm32"))]
+pub type FileDataHandle = std::sync::Arc<FileData>; // Use `Arc<T>` in native platforms
 
 #[derive(Clone)]
 pub struct FileLoader {
@@ -79,10 +85,10 @@ pub struct FileLoaderInner {
     file_id_map: bimap::BiHashMap<String, FileId>,
     next_file_id: FileId,
 
-    endpoint_id_map: HashMap<EndpointId, async_channel::Sender<Rc<FileData>>>,
+    endpoint_id_map: HashMap<EndpointId, async_channel::Sender<FileDataHandle>>,
     next_endpoint_id: EndpointId,
 
-    ready_resources: HashMap<FileId, Rc<FileData>>,
+    ready_resources: HashMap<FileId, FileDataHandle>,
     pending_resources: HashMap<FileId, Rc<RefCell<PendingFile>>>,
 }
 
@@ -131,7 +137,7 @@ impl FileLoader {
         }
     }
 
-    pub fn try_get_resource(&self, path: &str) -> Option<Rc<FileData>> {
+    pub fn try_get_resource(&self, path: &str) -> Option<FileDataHandle> {
         let inner = self.inner.borrow_mut();
 
         match inner.file_id_map.get_by_left(path) {
@@ -145,7 +151,7 @@ impl FileLoader {
 
     pub fn get_or_request<Callback>(&mut self, path: &str, callback: Callback) -> FileId
     where
-        Callback: 'static + FnOnce(&Rc<FileData>),
+        Callback: 'static + FnOnce(&FileDataHandle),
     {
         let mut inner = self.inner.borrow_mut();
 
@@ -214,7 +220,7 @@ impl FileLoader {
                     // Add to ready resources
                     inner
                         .ready_resources
-                        .insert(id, Rc::new(FileData { id, data }));
+                        .insert(id, FileDataHandle::new(FileData { id, data }));
                 }
             }
 
@@ -238,7 +244,7 @@ impl FileLoader {
 
     pub fn make_endpoint(&mut self) -> FileLoaderEndpoint {
         let (id, receiver) = {
-            let (sender, receiver) = async_channel::unbounded::<Rc<FileData>>();
+            let (sender, receiver) = async_channel::unbounded::<FileDataHandle>();
             let mut inner = self.inner.borrow_mut();
             let id = inner.next_endpoint_id;
             inner.next_endpoint_id = EndpointId(id.0 + 1);
@@ -256,13 +262,13 @@ impl FileLoader {
 }
 
 pub struct FileLoaderEndpoint {
-    loader: FileLoader,
+    pub loader: FileLoader,
     id: EndpointId,
-    pub receiver: async_channel::Receiver<Rc<FileData>>,
+    pub receiver: async_channel::Receiver<FileDataHandle>,
 }
 
 impl FileLoaderEndpoint {
-    pub fn request_for_endpoint(&mut self, path: &str) {
+    pub fn request(&mut self, path: &str) {
         let sender = self
             .loader
             .inner
@@ -272,7 +278,25 @@ impl FileLoaderEndpoint {
             .expect("Endpoint wasn't registered?")
             .clone();
         self.loader.get_or_request(path, move |x| {
-            let _ = sender.send(x.clone());
+            let x = x.clone();
+            let loader_fn = async move {
+                match sender.send(x.clone()).await {
+                    Ok(_) => {
+                        log::info!("Its ok");
+                    }
+                    Err(err) => {
+                        log::error!("Failed to load . Error: \"{}\"", err);
+                    }
+                };
+            };
+
+            cfg_if::cfg_if! {
+                if #[cfg(target_arch = "wasm32")] {
+                    wasm_bindgen_futures::spawn_local(loader_fn);
+                } else {
+                    async_std::task::spawn(loader_fn);
+                }
+            }
         });
     }
 }

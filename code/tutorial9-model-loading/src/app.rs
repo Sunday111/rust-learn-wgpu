@@ -17,9 +17,6 @@ use std::{iter, pin::Pin};
 use web_time::Instant;
 
 struct Renderer<'a> {
-    sender: async_channel::Sender<(String, Vec<u8>)>,
-    receiver: async_channel::Receiver<(String, Vec<u8>)>,
-
     start_time: Instant,
     window: Pin<Box<Window>>,
     surface: wgpu::Surface<'a>,
@@ -42,6 +39,7 @@ struct Renderer<'a> {
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     camera_controller: CameraController,
+    file_loader: klgl::resources::FileLoader,
 
     show_depth: bool,
 }
@@ -245,16 +243,15 @@ impl<'a> Renderer<'a> {
             bias: wgpu::DepthBiasState::default(),
         });
 
-        let (sender, receiver) = async_channel::unbounded::<(String, Vec<u8>)>();
+        let mut file_loader = klgl::resources::FileLoader::new();
 
         let models_draw_pass = ModelsDrawPass::new(
+            &mut file_loader,
             &device,
             &queue,
             &camera_bind_group_layout,
             config.format,
             depth_stencil_state.clone(),
-            sender.clone(),
-            receiver.clone(),
         )
         .await;
 
@@ -266,8 +263,6 @@ impl<'a> Renderer<'a> {
         );
 
         Self {
-            sender,
-            receiver,
             start_time: Instant::now(),
             window: window_box,
             surface,
@@ -289,6 +284,7 @@ impl<'a> Renderer<'a> {
             camera_bind_group,
             camera_controller: CameraController::new(0.2, 0.2),
             show_depth: false,
+            file_loader,
         }
     }
 
@@ -403,6 +399,7 @@ impl<'a> Renderer<'a> {
     }
 
     fn update(&mut self) {
+        self.file_loader.poll();
         let now = Instant::now();
         let since_last_print = now.duration_since(self.last_stat_print);
         if since_last_print.as_secs_f32() > 5.0 {

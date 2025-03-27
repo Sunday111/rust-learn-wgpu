@@ -122,7 +122,6 @@ pub struct TextureData {
 }
 
 pub struct ModelsDrawPass {
-    receiver: async_channel::Receiver<(String, Vec<u8>)>,
     pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
@@ -132,52 +131,20 @@ pub struct ModelsDrawPass {
     texture_bind_group_layout: wgpu::BindGroupLayout,
     textures: Vec<TextureData>,
     active_texture: u32,
+    file_loader_endpoint: klgl::resources::FileLoaderEndpoint,
 }
 
 impl ModelsDrawPass {
-    pub fn num_textures(&self) -> u32 {
-        return self.textures.len() as u32;
-    }
-
-    fn make_texture_data(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        data: &[u8],
-        path: String,
-        bind_group_layout: &wgpu::BindGroupLayout,
-    ) -> TextureData {
-        let texture = klgl::Texture::from_bytes(&device, &queue, data, &path).unwrap();
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&texture.sampler),
-                },
-            ],
-            label: Some(&path),
-        });
-
-        TextureData {
-            path: path,
-            texture: texture,
-            bind_group: bind_group,
-        }
-    }
-
     pub async fn new(
+        file_loader: &mut klgl::resources::FileLoader,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         camera_bind_group_layout: &wgpu::BindGroupLayout,
         surface_format: wgpu::TextureFormat,
         depth_stencil_state: Option<wgpu::DepthStencilState>,
-        sender: async_channel::Sender<(String, Vec<u8>)>,
-        receiver: async_channel::Receiver<(String, Vec<u8>)>,
     ) -> Self {
+        let mut file_loader_endpoint = file_loader.make_endpoint();
+
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 entries: &[
@@ -217,30 +184,7 @@ impl ModelsDrawPass {
                 &texture_bind_group_layout,
             ));
 
-            // Load real textures asynchronously
-            {
-                let sender_clone = sender.clone();
-                let path_clone: String = texture_path.clone();
-                let loader_fn = async move {
-                    match klgl::resources::load_binary(&path_clone).await {
-                        Ok(data) => {
-                            log::info!("Received: \"{}\"", path_clone);
-                            let _ = sender_clone.send((path_clone, data)).await;
-                        }
-                        Err(err) => {
-                            log::error!("Failed to load \"{}\". Reason: \"{}\"", path_clone, err);
-                        }
-                    };
-                };
-
-                cfg_if::cfg_if! {
-                    if #[cfg(target_arch = "wasm32")] {
-                        wasm_bindgen_futures::spawn_local(loader_fn);
-                    } else {
-                        async_std::task::spawn(loader_fn);
-                    }
-                }
-            }
+            file_loader_endpoint.request(&texture_path);
         }
 
         let num_indices = TRIANGLE_INDICES.len();
@@ -277,7 +221,6 @@ impl ModelsDrawPass {
         });
 
         Self {
-            receiver,
             pipeline: models_pipeline,
             vertex_buffer: model_vertex_buffer,
             index_buffer: model_index_buffer,
@@ -287,6 +230,41 @@ impl ModelsDrawPass {
             texture_bind_group_layout,
             textures,
             active_texture: 0,
+            file_loader_endpoint,
+        }
+    }
+
+    pub fn num_textures(&self) -> u32 {
+        return self.textures.len() as u32;
+    }
+
+    fn make_texture_data(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        data: &[u8],
+        path: String,
+        bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> TextureData {
+        let texture = klgl::Texture::from_bytes(&device, &queue, data, &path).unwrap();
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&texture.sampler),
+                },
+            ],
+            label: Some(&path),
+        });
+
+        TextureData {
+            path: path,
+            texture: texture,
+            bind_group: bind_group,
         }
     }
 
@@ -314,13 +292,19 @@ impl ModelsDrawPass {
     }
 
     pub fn update(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, angle: Deg<f32>) {
-        while let Ok((texture_path, data)) = self.receiver.try_recv() {
+        while let Ok(file_data) = self.file_loader_endpoint.receiver.try_recv() {
+            let texture_path = self
+                .file_loader_endpoint
+                .loader
+                .path_by_id(file_data.id)
+                .unwrap();
+
             match self.textures.iter().position(|x| x.path == texture_path) {
                 Some(index) => {
                     self.textures[index] = Self::make_texture_data(
                         &device,
                         queue,
-                        &data,
+                        &file_data.data,
                         texture_path,
                         &self.texture_bind_group_layout,
                     );
