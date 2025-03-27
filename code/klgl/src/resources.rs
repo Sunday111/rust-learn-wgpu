@@ -1,6 +1,5 @@
 use cfg_if::cfg_if;
-use derive_more::Display;
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 #[cfg(target_arch = "wasm32")]
 fn format_url(file_name: &str) -> reqwest::Url {
@@ -51,14 +50,13 @@ pub async fn load_binary(file_name: &str) -> anyhow::Result<Vec<u8>> {
     Ok(data)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FileId(u32);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct EndpointId(u32);
 
 struct PendingFile {
-    id: FileId,
     // it's an array because multiple places might be waiting for the same file
     callbacks: Vec<Box<dyn FnOnce(&Rc<FileData>)>>,
 }
@@ -78,28 +76,31 @@ pub struct FileLoaderInner {
     sender: async_channel::Sender<(String, Vec<u8>)>,
     receiver: async_channel::Receiver<(String, Vec<u8>)>,
 
-    name_id_map: bimap::BiHashMap<String, FileId>,
-    ready_resources: std::collections::HashMap<FileId, Rc<FileData>>,
-    pending_resources: std::collections::HashMap<FileId, Rc<RefCell<PendingFile>>>,
+    file_id_map: bimap::BiHashMap<String, FileId>,
+    next_file_id: FileId,
 
-    next_id: FileId,
+    endpoint_id_map: HashMap<EndpointId, async_channel::Sender<Rc<FileData>>>,
+    next_endpoint_id: EndpointId,
+
+    ready_resources: HashMap<FileId, Rc<FileData>>,
+    pending_resources: HashMap<FileId, Rc<RefCell<PendingFile>>>,
 }
 
 impl FileLoaderInner {
-    fn find_id(&self, path: &str) -> Option<FileId> {
-        match self.name_id_map.get_by_left(path) {
+    fn find_file_id(&self, path: &str) -> Option<FileId> {
+        match self.file_id_map.get_by_left(path) {
             Some(id) => Some(*id),
             None => None,
         }
     }
 
-    fn find_or_add_id(&mut self, path: &str) -> FileId {
-        match self.find_id(path) {
+    fn find_or_add_file_id(&mut self, path: &str) -> FileId {
+        match self.find_file_id(path) {
             Some(id) => id,
             None => {
-                let id = self.next_id;
-                self.next_id = FileId(self.next_id.0 + 1);
-                self.name_id_map.insert(path.into(), id);
+                let id = self.next_file_id;
+                self.next_file_id = FileId(self.next_file_id.0 + 1);
+                self.file_id_map.insert(path.into(), id);
                 id
             }
         }
@@ -107,16 +108,25 @@ impl FileLoaderInner {
 }
 
 impl FileLoader {
+    pub fn path_by_id(&self, id: FileId) -> Option<String> {
+        match self.inner.borrow().file_id_map.get_by_right(&id) {
+            Some(s) => Some(s.clone()),
+            None => None,
+        }
+    }
+
     pub fn new() -> Self {
         let (sender, receiver) = async_channel::unbounded::<(String, Vec<u8>)>();
         Self {
             inner: Rc::new(RefCell::new(FileLoaderInner {
                 sender,
                 receiver,
-                name_id_map: bimap::BiHashMap::new(),
-                ready_resources: std::collections::HashMap::new(),
-                pending_resources: std::collections::HashMap::new(),
-                next_id: FileId(0),
+                file_id_map: bimap::BiHashMap::new(),
+                next_file_id: FileId(0),
+                endpoint_id_map: HashMap::new(),
+                next_endpoint_id: EndpointId(0),
+                ready_resources: HashMap::new(),
+                pending_resources: HashMap::new(),
             })),
         }
     }
@@ -124,7 +134,7 @@ impl FileLoader {
     pub fn try_get_resource(&self, path: &str) -> Option<Rc<FileData>> {
         let inner = self.inner.borrow_mut();
 
-        match inner.name_id_map.get_by_left(path) {
+        match inner.file_id_map.get_by_left(path) {
             Some(id) => match inner.ready_resources.get(id) {
                 Some(resource) => Some(resource.clone()),
                 None => None,
@@ -133,27 +143,27 @@ impl FileLoader {
         }
     }
 
-    pub fn get_or_request<Callback>(&mut self, path: &str, callback: Callback)
+    pub fn get_or_request<Callback>(&mut self, path: &str, callback: Callback) -> FileId
     where
         Callback: 'static + FnOnce(&Rc<FileData>),
     {
         let mut inner = self.inner.borrow_mut();
 
-        let id = inner.find_or_add_id(path);
+        let id = inner.find_or_add_file_id(path);
 
         if let Some(file_data) = inner.ready_resources.get(&id) {
-            return callback(file_data);
+            callback(file_data);
+            return id;
         }
 
         if let Some(pending) = inner.pending_resources.get(&id) {
             pending.borrow_mut().callbacks.push(Box::new(callback));
-            return;
+            return id;
         }
 
         inner.pending_resources.insert(
             id,
             Rc::new(RefCell::new(PendingFile {
-                id,
                 callbacks: vec![Box::new(callback)],
             })),
         );
@@ -179,12 +189,14 @@ impl FileLoader {
                 async_std::task::spawn(loader_fn);
             }
         }
+
+        return id;
     }
 
     pub fn poll(&mut self) {
         let mut inner = self.inner.borrow_mut();
         while let Ok((path, data)) = inner.receiver.try_recv() {
-            let id = inner.find_or_add_id(&path);
+            let id = inner.find_or_add_file_id(&path);
             let removed_entry = inner.pending_resources.remove_entry(&id);
 
             if let None = removed_entry {
@@ -216,23 +228,54 @@ impl FileLoader {
                     _ => {
                         log::error!(
                             "Something went very wrong here: succesfully inserted file data for \"{}\" but failed to find it a few calls later",
-                            removed_key
+                            removed_key.0
                         );
                     }
                 }
             }
         }
     }
+
+    pub fn make_endpoint(&mut self) -> FileLoaderEndpoint {
+        let (id, receiver) = {
+            let (sender, receiver) = async_channel::unbounded::<Rc<FileData>>();
+            let mut inner = self.inner.borrow_mut();
+            let id = inner.next_endpoint_id;
+            inner.next_endpoint_id = EndpointId(id.0 + 1);
+            inner.endpoint_id_map.insert(id, sender);
+            (id, receiver)
+        };
+        FileLoaderEndpoint {
+            id,
+            receiver,
+            loader: FileLoader {
+                inner: self.inner.clone(),
+            },
+        }
+    }
 }
 
-// struct FileLoaderEndpoint {
-//     loader: FileLoader,
-//     receiver: async_channel::Receiver<Rc<FileData>>,
-// }
+pub struct FileLoaderEndpoint {
+    loader: FileLoader,
+    id: EndpointId,
+    pub receiver: async_channel::Receiver<Rc<FileData>>,
+}
 
-// impl FileLoaderEndpoint {
-
-// }
+impl FileLoaderEndpoint {
+    pub fn request_for_endpoint(&mut self, path: &str) {
+        let sender = self
+            .loader
+            .inner
+            .borrow()
+            .endpoint_id_map
+            .get(&self.id)
+            .expect("Endpoint wasn't registered?")
+            .clone();
+        self.loader.get_or_request(path, move |x| {
+            let _ = sender.send(x.clone());
+        });
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -246,5 +289,8 @@ mod tests {
             println!("ready: {:?}", x);
         });
         loader.poll();
+
+        let expected: String = "why hello".into();
+        assert_eq!(loader.path_by_id(FileId(0)), Some(expected));
     }
 }
