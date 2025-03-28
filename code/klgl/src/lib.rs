@@ -1,8 +1,8 @@
 mod camera;
 mod camera_controller;
 mod common;
+pub mod file_loader;
 mod fps_counter;
-pub mod resources;
 mod rotator;
 mod settings;
 mod texture;

@@ -131,12 +131,12 @@ pub struct ModelsDrawPass {
     texture_bind_group_layout: wgpu::BindGroupLayout,
     textures: Vec<TextureData>,
     active_texture: u32,
-    file_loader_endpoint: klgl::resources::FileLoaderEndpoint,
+    file_loader_endpoint: klgl::file_loader::FileLoaderEndpoint,
 }
 
 impl ModelsDrawPass {
     pub async fn new(
-        file_loader: &mut klgl::resources::FileLoader,
+        file_loader: &mut klgl::file_loader::FileLoader,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         camera_bind_group_layout: &wgpu::BindGroupLayout,

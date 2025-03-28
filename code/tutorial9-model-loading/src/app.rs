@@ -39,7 +39,7 @@ struct Renderer<'a> {
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     camera_controller: CameraController,
-    file_loader: klgl::resources::FileLoader,
+    file_loader: klgl::file_loader::FileLoader,
 
     show_depth: bool,
 }
@@ -243,7 +243,7 @@ impl<'a> Renderer<'a> {
             bias: wgpu::DepthBiasState::default(),
         });
 
-        let mut file_loader = klgl::resources::FileLoader::new();
+        let mut file_loader = klgl::file_loader::FileLoader::new();
 
         let models_draw_pass = ModelsDrawPass::new(
             &mut file_loader,

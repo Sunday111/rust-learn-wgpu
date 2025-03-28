@@ -88,8 +88,8 @@ pub struct FileLoaderInner {
     endpoint_id_map: HashMap<EndpointId, async_channel::Sender<FileDataHandle>>,
     next_endpoint_id: EndpointId,
 
-    ready_resources: HashMap<FileId, FileDataHandle>,
-    pending_resources: HashMap<FileId, Rc<RefCell<PendingFile>>>,
+    ready_files: HashMap<FileId, FileDataHandle>,
+    pending_files: HashMap<FileId, Rc<RefCell<PendingFile>>>,
 }
 
 impl FileLoaderInner {
@@ -131,18 +131,18 @@ impl FileLoader {
                 next_file_id: FileId(0),
                 endpoint_id_map: HashMap::new(),
                 next_endpoint_id: EndpointId(0),
-                ready_resources: HashMap::new(),
-                pending_resources: HashMap::new(),
+                ready_files: HashMap::new(),
+                pending_files: HashMap::new(),
             })),
         }
     }
 
-    pub fn try_get_resource(&self, path: &str) -> Option<FileDataHandle> {
+    pub fn try_get_file(&self, path: &str) -> Option<FileDataHandle> {
         let inner = self.inner.borrow_mut();
 
         match inner.file_id_map.get_by_left(path) {
-            Some(id) => match inner.ready_resources.get(id) {
-                Some(resource) => Some(resource.clone()),
+            Some(id) => match inner.ready_files.get(id) {
+                Some(file) => Some(file.clone()),
                 None => None,
             },
             None => None,
@@ -157,17 +157,17 @@ impl FileLoader {
 
         let id = inner.find_or_add_file_id(path);
 
-        if let Some(file_data) = inner.ready_resources.get(&id) {
+        if let Some(file_data) = inner.ready_files.get(&id) {
             callback(file_data);
             return id;
         }
 
-        if let Some(pending) = inner.pending_resources.get(&id) {
+        if let Some(pending) = inner.pending_files.get(&id) {
             pending.borrow_mut().callbacks.push(Box::new(callback));
             return id;
         }
 
-        inner.pending_resources.insert(
+        inner.pending_files.insert(
             id,
             Rc::new(RefCell::new(PendingFile {
                 callbacks: vec![Box::new(callback)],
@@ -203,7 +203,7 @@ impl FileLoader {
         let mut inner = self.inner.borrow_mut();
         while let Ok((path, data)) = inner.receiver.try_recv() {
             let id = inner.find_or_add_file_id(&path);
-            let removed_entry = inner.pending_resources.remove_entry(&id);
+            let removed_entry = inner.pending_files.remove_entry(&id);
 
             if let None = removed_entry {
                 log::error!(
@@ -212,20 +212,20 @@ impl FileLoader {
                 );
             }
 
-            match inner.ready_resources.get(&id) {
+            match inner.ready_files.get(&id) {
                 Some(_) => {
                     log::error!("Got data for \"{}\" but data was already cached", &path);
                 }
                 None => {
-                    // Add to ready resources
+                    // Add to ready files
                     inner
-                        .ready_resources
+                        .ready_files
                         .insert(id, FileDataHandle::new(FileData { id, data }));
                 }
             }
 
             if let Some((removed_key, pending)) = removed_entry {
-                match inner.ready_resources.get(&removed_key) {
+                match inner.ready_files.get(&removed_key) {
                     Some(file_data) => {
                         for callback in std::mem::take(&mut pending.borrow_mut().callbacks) {
                             callback(&file_data);
