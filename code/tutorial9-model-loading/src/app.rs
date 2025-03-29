@@ -13,15 +13,13 @@ use crate::{display_depth_draw_pass::DisplayDepthDrawPass, lines_draw_pass::Line
 use klgl::{Camera, CameraController, CameraUniform, Rotator};
 
 use cgmath::Deg;
-use std::{iter, pin::Pin};
+use std::iter;
 use web_time::Instant;
 
-struct Renderer<'a> {
+struct Renderer {
+    render_context: klgl::RenderContext,
+
     start_time: Instant,
-    window: Pin<Box<Window>>,
-    surface: wgpu::Surface<'a>,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
     clear_color: wgpu::Color,
@@ -44,24 +42,17 @@ struct Renderer<'a> {
     show_depth: bool,
 }
 
-pub struct App<'a> {
-    renderer: Option<Renderer<'a>>,
+pub struct App {
+    renderer: Option<Renderer>,
 }
 
-impl<'a> App<'a> {
+impl App {
     pub async fn new() -> Self {
-        Self {
-            renderer: None,
-            // some_texture: Some(
-            //     klgl::resources::load_binary("models/cube/cube-diffuse.jpg")
-            //         .await
-            //         .unwrap(),
-            // ),
-        }
+        Self { renderer: None }
     }
 }
 
-impl<'a> ApplicationHandler for App<'a> {
+impl<'a> ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let renderer = Renderer::new(
             event_loop
@@ -86,62 +77,9 @@ impl<'a> ApplicationHandler for App<'a> {
     }
 }
 
-impl<'a> Renderer<'a> {
+impl Renderer {
     async fn new(w: Window) -> Self {
-        // The instance is a handle to our GPU
-        // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            #[cfg(not(target_arch = "wasm32"))]
-            backends: wgpu::Backends::PRIMARY,
-            #[cfg(target_arch = "wasm32")]
-            backends: wgpu::Backends::GL,
-            ..Default::default()
-        });
-
-        let window_box = Box::pin(w);
-        // SAFETY: `boxed` is pinned, so we can safely create a reference to `window`
-        let window_ref: &'static Window =
-            unsafe { &*(Pin::as_ref(&window_box).get_ref() as *const _) };
-        let size = window_ref.inner_size();
-
-        let surface = instance.create_surface(window_ref).unwrap();
-
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::default(),
-                compatible_surface: Some(&surface),
-                force_fallback_adapter: false,
-            })
-            .await
-            .unwrap();
-
-        let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: None,
-                    required_features: wgpu::Features::empty(),
-                    // WebGL doesn't support all of wgpu's features, so if
-                    // we're building for the web we'll have to disable some.
-                    required_limits: if cfg!(target_arch = "wasm32") {
-                        let mut l = wgpu::Limits::downlevel_webgl2_defaults();
-                        l.max_texture_dimension_2d = 4096;
-                        l
-                    } else {
-                        wgpu::Limits::default()
-                    },
-                    memory_hints: Default::default(),
-                },
-                // Some(&std::path::Path::new("trace")), // Trace path
-                None,
-            )
-            .await
-            .unwrap();
-
-        let device_limits = device.limits();
-        log::info!("device limits: {:?}", device_limits);
-
-        let adapter_info = adapter.get_info();
-        log::info!("adapter info: {:?}", adapter_info);
+        let render_context = klgl::RenderContext::new(w).await;
 
         #[cfg(target_arch = "wasm32")]
         {
@@ -159,7 +97,9 @@ impl<'a> Renderer<'a> {
                 .expect("Couldn't append canvas to document body.");
         }
 
-        let surface_caps = surface.get_capabilities(&adapter);
+        let surface_caps = render_context
+            .surface
+            .get_capabilities(&render_context.adapter);
         // Shader code in this tutorial assumes an Srgb surface texture. Using a different
         // one will result all the colors comming out darker. If you want to support non
         // Srgb surfaces, you'll need to account for that when drawing to the frame.
@@ -170,23 +110,30 @@ impl<'a> Renderer<'a> {
             .find(|f| f.is_srgb())
             .unwrap_or(surface_caps.formats[0]);
 
-        let depth_texture =
-            klgl::Texture::create_depth_texture(&device, size.width, size.height, "depth_texture");
+        let size = render_context.window.inner_size();
+        let depth_texture = klgl::Texture::create_depth_texture(
+            &render_context.device,
+            size.width,
+            size.height,
+            "depth_texture",
+        );
 
         let camera_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-                label: Some("camera_bind_group_layout"),
-            });
+            render_context
+                .device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    entries: &[wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    }],
+                    label: Some("camera_bind_group_layout"),
+                });
 
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -218,20 +165,26 @@ impl<'a> Renderer<'a> {
         let mut camera_uniform = CameraUniform::new();
         camera_uniform.update_view_proj(&camera);
 
-        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Camera Buffer"),
-            contents: bytemuck::cast_slice(&[camera_uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let camera_buffer =
+            render_context
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Camera Buffer"),
+                    contents: bytemuck::cast_slice(&[camera_uniform]),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
 
-        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &camera_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: camera_buffer.as_entire_binding(),
-            }],
-            label: Some("camera_bind_group"),
-        });
+        let camera_bind_group =
+            render_context
+                .device
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    layout: &camera_bind_group_layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: camera_buffer.as_entire_binding(),
+                    }],
+                    label: Some("camera_bind_group"),
+                });
 
         let depth_stencil_state = Some(wgpu::DepthStencilState {
             format: klgl::Texture::DEPTH_FORMAT,
@@ -247,8 +200,8 @@ impl<'a> Renderer<'a> {
 
         let models_draw_pass = ModelsDrawPass::new(
             &mut file_loader,
-            &device,
-            &queue,
+            &render_context.device,
+            &render_context.queue,
             &camera_bind_group_layout,
             config.format,
             depth_stencil_state.clone(),
@@ -256,18 +209,15 @@ impl<'a> Renderer<'a> {
         .await;
 
         let lines_draw_pass = LinesDrawPass::new(
-            &device,
+            &render_context.device,
             &camera_bind_group_layout,
             config.format,
             depth_stencil_state,
         );
 
         Self {
+            render_context,
             start_time: Instant::now(),
-            window: window_box,
-            surface,
-            device,
-            queue,
             config,
             size,
             depth_texture,
@@ -325,7 +275,7 @@ impl<'a> Renderer<'a> {
             }
             WindowEvent::RedrawRequested => {
                 // This tells winit that we want another frame after this one
-                self.window.request_redraw();
+                self.render_context.window.request_redraw();
 
                 if !self.surface_configured {
                     return;
@@ -363,12 +313,14 @@ impl<'a> Renderer<'a> {
                 button,
             } => {
                 if button == MouseButton::Left && state == ElementState::Pressed {
-                    self.models_draw_pass.swap_model(&self.device);
+                    self.models_draw_pass
+                        .swap_model(&self.render_context.device);
                 }
             }
             WindowEvent::Touch(touch) => {
                 if touch.phase == TouchPhase::Started {
-                    self.models_draw_pass.swap_model(&self.device);
+                    self.models_draw_pass
+                        .swap_model(&self.render_context.device);
                 }
             }
             _ => {}
@@ -380,16 +332,20 @@ impl<'a> Renderer<'a> {
             self.size = new_size;
             self.config.width = new_size.width;
             self.config.height = new_size.height;
-            self.surface.configure(&self.device, &self.config);
+            self.render_context
+                .surface
+                .configure(&self.render_context.device, &self.config);
             self.depth_texture = klgl::Texture::create_depth_texture(
-                &self.device,
+                &self.render_context.device,
                 self.config.width,
                 self.config.height,
                 "depth_texture",
             );
 
             match &mut self.display_depth_draw_pass {
-                Some(draw_pass) => draw_pass.on_resize(&self.device, &self.depth_texture),
+                Some(draw_pass) => {
+                    draw_pass.on_resize(&self.render_context.device, &self.depth_texture)
+                }
                 _ => {}
             }
 
@@ -420,15 +376,15 @@ impl<'a> Renderer<'a> {
 
         self.camera_controller.update_camera(&mut self.camera);
         self.camera_uniform.update_view_proj(&self.camera);
-        self.queue.write_buffer(
+        self.render_context.queue.write_buffer(
             &self.camera_buffer,
             0,
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
 
         self.models_draw_pass.update(
-            &self.device,
-            &self.queue,
+            &self.render_context.device,
+            &self.render_context.queue,
             Deg(90.0 + 80.0 * (dur_since_start.as_secs_f32() * 2.0).sin()),
         );
     }
@@ -439,16 +395,17 @@ impl<'a> Renderer<'a> {
             return Ok(());
         }
 
-        let output = self.surface.get_current_texture()?;
+        let output = self.render_context.surface.get_current_texture()?;
         let view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Render Encoder"),
-            });
+        let mut encoder =
+            self.render_context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Render Encoder"),
+                });
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -491,7 +448,7 @@ impl<'a> Renderer<'a> {
         if self.show_depth {
             if self.display_depth_draw_pass.is_none() {
                 self.display_depth_draw_pass = Some(DisplayDepthDrawPass::new(
-                    &self.device,
+                    &self.render_context.device,
                     self.config.format,
                     &self.depth_texture,
                 ));
@@ -523,7 +480,9 @@ impl<'a> Renderer<'a> {
             }
         }
 
-        self.queue.submit(iter::once(encoder.finish()));
+        self.render_context
+            .queue
+            .submit(iter::once(encoder.finish()));
         output.present();
         Ok(())
     }
