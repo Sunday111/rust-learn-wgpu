@@ -17,11 +17,10 @@ use std::iter;
 use web_time::Instant;
 
 struct Renderer {
+    file_loader: klgl::file_loader::FileLoader,
     render_context: klgl::RenderContext,
 
     start_time: Instant,
-    config: wgpu::SurfaceConfiguration,
-    size: winit::dpi::PhysicalSize<u32>,
     clear_color: wgpu::Color,
     surface_configured: bool,
     frame_counter: klgl::FpsCounter,
@@ -37,7 +36,6 @@ struct Renderer {
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     camera_controller: CameraController,
-    file_loader: klgl::file_loader::FileLoader,
 
     show_depth: bool,
 }
@@ -81,35 +79,6 @@ impl Renderer {
     async fn new(w: Window) -> Self {
         let render_context = klgl::RenderContext::new(w).await;
 
-        #[cfg(target_arch = "wasm32")]
-        {
-            // Winit prevents sizing with CSS, so we have to set
-            // the size manually when on web.
-            use winit::platform::web::WindowExtWebSys;
-            web_sys::window()
-                .and_then(|win| win.document())
-                .and_then(|doc| {
-                    let dst = doc.get_element_by_id("wasm-body")?;
-                    let canvas = web_sys::Element::from(window_ref.canvas()?);
-                    dst.append_child(&canvas).ok()?;
-                    Some(())
-                })
-                .expect("Couldn't append canvas to document body.");
-        }
-
-        let surface_caps = render_context
-            .surface
-            .get_capabilities(&render_context.adapter);
-        // Shader code in this tutorial assumes an Srgb surface texture. Using a different
-        // one will result all the colors comming out darker. If you want to support non
-        // Srgb surfaces, you'll need to account for that when drawing to the frame.
-        let surface_format = surface_caps
-            .formats
-            .iter()
-            .copied()
-            .find(|f| f.is_srgb())
-            .unwrap_or(surface_caps.formats[0]);
-
         let size = render_context.window.inner_size();
         let depth_texture = klgl::Texture::create_depth_texture(
             &render_context.device,
@@ -135,17 +104,6 @@ impl Renderer {
                     label: Some("camera_bind_group_layout"),
                 });
 
-        let config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: surface_format,
-            width: size.width,
-            height: size.height,
-            present_mode: surface_caps.present_modes[0],
-            alpha_mode: surface_caps.alpha_modes[0],
-            desired_maximum_frame_latency: 2,
-            view_formats: vec![],
-        };
-
         let camera = Camera::new(
             // position the camera 1 unit up and 2 units back
             // +z is out of the screen
@@ -156,7 +114,7 @@ impl Renderer {
                 pitch: Deg(56.0),
                 roll: Deg(0.0),
             },
-            config.width as f32 / config.height as f32,
+            render_context.aspect(),
             90.0,
             0.1,
             100.0,
@@ -203,7 +161,7 @@ impl Renderer {
             &render_context.device,
             &render_context.queue,
             &camera_bind_group_layout,
-            config.format,
+            render_context.config.format,
             depth_stencil_state.clone(),
         )
         .await;
@@ -211,15 +169,13 @@ impl Renderer {
         let lines_draw_pass = LinesDrawPass::new(
             &render_context.device,
             &camera_bind_group_layout,
-            config.format,
+            render_context.config.format,
             depth_stencil_state,
         );
 
         Self {
             render_context,
             start_time: Instant::now(),
-            config,
-            size,
             depth_texture,
             clear_color: wgpu::Color::BLACK,
             surface_configured: false,
@@ -271,7 +227,7 @@ impl Renderer {
             WindowEvent::Resized(physical_size) => {
                 log::info!("physical_size: {physical_size:?}");
                 self.surface_configured = true;
-                self.resize(physical_size);
+                self.resize(physical_size.width, physical_size.height);
             }
             WindowEvent::RedrawRequested => {
                 // This tells winit that we want another frame after this one
@@ -285,9 +241,10 @@ impl Renderer {
                 match self.render() {
                     Ok(_) => {}
                     // Reconfigure the surface if it's lost or outdated
-                    Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
-                        self.resize(self.size)
-                    }
+                    Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => self.resize(
+                        self.render_context.config.width,
+                        self.render_context.config.height,
+                    ),
                     // The system is out of memory, we should probably quit
                     Err(wgpu::SurfaceError::OutOfMemory | wgpu::SurfaceError::Other) => {
                         log::error!("OutOfMemory");
@@ -304,8 +261,10 @@ impl Renderer {
                 device_id,
                 position,
             } => {
-                self.clear_color.r = position.x as f64 / self.size.width as f64;
-                self.clear_color.g = position.y as f64 / self.size.height as f64;
+                let w = self.render_context.config.width as f64;
+                let h = self.render_context.config.height as f64;
+                self.clear_color.r = position.x as f64 / w;
+                self.clear_color.g = position.y as f64 / h;
             }
             WindowEvent::MouseInput {
                 device_id,
@@ -327,18 +286,13 @@ impl Renderer {
         }
     }
 
-    pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
-        if new_size.width > 0 && new_size.height > 0 {
-            self.size = new_size;
-            self.config.width = new_size.width;
-            self.config.height = new_size.height;
-            self.render_context
-                .surface
-                .configure(&self.render_context.device, &self.config);
+    pub fn resize(&mut self, width: u32, height: u32) {
+        if width > 0 && height > 0 {
+            self.render_context.resize(width, height);
             self.depth_texture = klgl::Texture::create_depth_texture(
                 &self.render_context.device,
-                self.config.width,
-                self.config.height,
+                self.render_context.config.width,
+                self.render_context.config.height,
                 "depth_texture",
             );
 
@@ -349,8 +303,7 @@ impl Renderer {
                 _ => {}
             }
 
-            self.camera
-                .set_aspect(new_size.width as f32 / new_size.height as f32);
+            self.camera.set_aspect(self.render_context.aspect());
         }
     }
 
@@ -449,7 +402,7 @@ impl Renderer {
             if self.display_depth_draw_pass.is_none() {
                 self.display_depth_draw_pass = Some(DisplayDepthDrawPass::new(
                     &self.render_context.device,
-                    self.config.format,
+                    self.render_context.config.format,
                     &self.depth_texture,
                 ));
             }
