@@ -13,12 +13,12 @@ use crate::{display_depth_draw_pass::DisplayDepthDrawPass, lines_draw_pass::Line
 use klgl::{Camera, CameraController, CameraUniform, Rotator};
 
 use cgmath::Deg;
-use std::iter;
+use std::{cell::RefCell, iter, rc::Rc};
 use web_time::Instant;
 
 struct Renderer {
     file_loader: klgl::file_loader::FileLoader,
-    render_context: klgl::RenderContext,
+    render_context: Rc<RefCell<klgl::RenderContext>>,
 
     start_time: Instant,
     clear_color: wgpu::Color,
@@ -77,32 +77,31 @@ impl<'a> ApplicationHandler for App {
 
 impl Renderer {
     async fn new(w: Window) -> Self {
-        let render_context = klgl::RenderContext::new(w).await;
+        let render_context = Rc::new(RefCell::new(klgl::RenderContext::new(w).await));
 
-        let size = render_context.window.inner_size();
+        let size = render_context.borrow().window.inner_size();
         let depth_texture = klgl::Texture::create_depth_texture(
-            &render_context.device,
+            &render_context.borrow().device,
             size.width,
             size.height,
             "depth_texture",
         );
 
-        let camera_bind_group_layout =
-            render_context
-                .device
-                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                    entries: &[wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    }],
-                    label: Some("camera_bind_group_layout"),
-                });
+        let camera_bind_group_layout = render_context.borrow().device.create_bind_group_layout(
+            &wgpu::BindGroupLayoutDescriptor {
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+                label: Some("camera_bind_group_layout"),
+            },
+        );
 
         let camera = Camera::new(
             // position the camera 1 unit up and 2 units back
@@ -114,7 +113,7 @@ impl Renderer {
                 pitch: Deg(56.0),
                 roll: Deg(0.0),
             },
-            render_context.aspect(),
+            render_context.borrow().aspect(),
             90.0,
             0.1,
             100.0,
@@ -125,6 +124,7 @@ impl Renderer {
 
         let camera_buffer =
             render_context
+                .borrow()
                 .device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
                     label: Some("Camera Buffer"),
@@ -134,6 +134,7 @@ impl Renderer {
 
         let camera_bind_group =
             render_context
+                .borrow()
                 .device
                 .create_bind_group(&wgpu::BindGroupDescriptor {
                     layout: &camera_bind_group_layout,
@@ -158,18 +159,15 @@ impl Renderer {
 
         let models_draw_pass = ModelsDrawPass::new(
             &mut file_loader,
-            &render_context.device,
-            &render_context.queue,
+            render_context.clone(),
             &camera_bind_group_layout,
-            render_context.config.format,
             depth_stencil_state.clone(),
         )
         .await;
 
         let lines_draw_pass = LinesDrawPass::new(
-            &render_context.device,
+            render_context.clone(),
             &camera_bind_group_layout,
-            render_context.config.format,
             depth_stencil_state,
         );
 
@@ -231,7 +229,7 @@ impl Renderer {
             }
             WindowEvent::RedrawRequested => {
                 // This tells winit that we want another frame after this one
-                self.render_context.window.request_redraw();
+                self.render_context.borrow().window.request_redraw();
 
                 if !self.surface_configured {
                     return;
@@ -241,10 +239,13 @@ impl Renderer {
                 match self.render() {
                     Ok(_) => {}
                     // Reconfigure the surface if it's lost or outdated
-                    Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => self.resize(
-                        self.render_context.config.width,
-                        self.render_context.config.height,
-                    ),
+                    Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                        let (w, h) = {
+                            let ctx = self.render_context.borrow();
+                            (ctx.config.width, ctx.config.height)
+                        };
+                        self.resize(w, h)
+                    }
                     // The system is out of memory, we should probably quit
                     Err(wgpu::SurfaceError::OutOfMemory | wgpu::SurfaceError::Other) => {
                         log::error!("OutOfMemory");
@@ -261,10 +262,9 @@ impl Renderer {
                 device_id,
                 position,
             } => {
-                let w = self.render_context.config.width as f64;
-                let h = self.render_context.config.height as f64;
-                self.clear_color.r = position.x as f64 / w;
-                self.clear_color.g = position.y as f64 / h;
+                let ctx = self.render_context.borrow();
+                self.clear_color.r = position.x as f64 / ctx.config.width as f64;
+                self.clear_color.g = position.y as f64 / ctx.config.height as f64;
             }
             WindowEvent::MouseInput {
                 device_id,
@@ -272,14 +272,12 @@ impl Renderer {
                 button,
             } => {
                 if button == MouseButton::Left && state == ElementState::Pressed {
-                    self.models_draw_pass
-                        .swap_model(&self.render_context.device);
+                    self.models_draw_pass.swap_model();
                 }
             }
             WindowEvent::Touch(touch) => {
                 if touch.phase == TouchPhase::Started {
-                    self.models_draw_pass
-                        .swap_model(&self.render_context.device);
+                    self.models_draw_pass.swap_model();
                 }
             }
             _ => {}
@@ -288,22 +286,27 @@ impl Renderer {
 
     pub fn resize(&mut self, width: u32, height: u32) {
         if width > 0 && height > 0 {
-            self.render_context.resize(width, height);
-            self.depth_texture = klgl::Texture::create_depth_texture(
-                &self.render_context.device,
-                self.render_context.config.width,
-                self.render_context.config.height,
-                "depth_texture",
-            );
+            {
+                let mut ctx = self.render_context.borrow_mut();
+                ctx.resize(width, height);
+                self.depth_texture = klgl::Texture::create_depth_texture(
+                    &ctx.device,
+                    ctx.config.width,
+                    ctx.config.height,
+                    "depth_texture",
+                );
+            }
 
             match &mut self.display_depth_draw_pass {
                 Some(draw_pass) => {
-                    draw_pass.on_resize(&self.render_context.device, &self.depth_texture)
+                    let ctx = self.render_context.borrow();
+                    draw_pass.on_resize(&ctx.device, &self.depth_texture)
                 }
                 _ => {}
             }
 
-            self.camera.set_aspect(self.render_context.aspect());
+            let ctx = self.render_context.borrow();
+            self.camera.set_aspect(ctx.aspect());
         }
     }
 
@@ -329,17 +332,15 @@ impl Renderer {
 
         self.camera_controller.update_camera(&mut self.camera);
         self.camera_uniform.update_view_proj(&self.camera);
-        self.render_context.queue.write_buffer(
+        self.render_context.borrow().queue.write_buffer(
             &self.camera_buffer,
             0,
             bytemuck::cast_slice(&[self.camera_uniform]),
         );
 
-        self.models_draw_pass.update(
-            &self.render_context.device,
-            &self.render_context.queue,
-            Deg(90.0 + 80.0 * (dur_since_start.as_secs_f32() * 2.0).sin()),
-        );
+        self.models_draw_pass.update(Deg(
+            90.0 + 80.0 * (dur_since_start.as_secs_f32() * 2.0).sin()
+        ));
     }
 
     fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -348,17 +349,16 @@ impl Renderer {
             return Ok(());
         }
 
-        let output = self.render_context.surface.get_current_texture()?;
+        let output = self.render_context.borrow().surface.get_current_texture()?;
         let view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        let mut encoder =
-            self.render_context
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Render Encoder"),
-                });
+        let mut encoder = self.render_context.borrow().device.create_command_encoder(
+            &wgpu::CommandEncoderDescriptor {
+                label: Some("Render Encoder"),
+            },
+        );
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -400,9 +400,11 @@ impl Renderer {
 
         if self.show_depth {
             if self.display_depth_draw_pass.is_none() {
+                let ctx_clone = self.render_context.clone();
+                let ctx = ctx_clone.borrow();
                 self.display_depth_draw_pass = Some(DisplayDepthDrawPass::new(
-                    &self.render_context.device,
-                    self.render_context.config.format,
+                    &ctx.device,
+                    ctx.config.format,
                     &self.depth_texture,
                 ));
             }
@@ -434,6 +436,7 @@ impl Renderer {
         }
 
         self.render_context
+            .borrow()
             .queue
             .submit(iter::once(encoder.finish()));
         output.present();

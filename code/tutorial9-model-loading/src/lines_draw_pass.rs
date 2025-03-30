@@ -1,3 +1,5 @@
+use std::{cell::RefCell, rc::Rc};
+
 use cgmath::Vector3;
 use wgpu::util::DeviceExt;
 
@@ -24,6 +26,8 @@ impl Vertex {
 }
 
 pub struct LinesDrawPass {
+    #[allow(dead_code)]
+    ctx: Rc<RefCell<klgl::RenderContext>>,
     pub pipeline: wgpu::RenderPipeline,
     pub vertex_buffer: wgpu::Buffer,
     pub num_lines: u32,
@@ -31,26 +35,31 @@ pub struct LinesDrawPass {
 
 impl LinesDrawPass {
     pub fn new(
-        device: &wgpu::Device,
+        ctx: Rc<RefCell<klgl::RenderContext>>,
         camera_bind_group_layout: &wgpu::BindGroupLayout,
-        surface_format: wgpu::TextureFormat,
         depth_stencil_state: Option<wgpu::DepthStencilState>,
     ) -> Self {
-        let (lines_vertex_buffer, num_lines) = Self::make_lines_buffer(device);
+        let (lines_vertex_buffer, num_lines) = Self::make_lines_buffer(&ctx.borrow().device);
+
+        let pipeline = {
+            let ctx = ctx.borrow();
+            Self::create_pipeline(
+                &ctx.device,
+                camera_bind_group_layout,
+                ctx.config.format,
+                depth_stencil_state,
+            )
+        };
 
         Self {
-            pipeline: Self::create_pipeline(
-                device,
-                camera_bind_group_layout,
-                surface_format,
-                depth_stencil_state,
-            ),
+            ctx,
+            pipeline,
             vertex_buffer: lines_vertex_buffer,
             num_lines,
         }
     }
 
-    pub fn create_pipeline(
+    fn create_pipeline(
         device: &wgpu::Device,
         camera_bind_group_layout: &wgpu::BindGroupLayout,
         texture_format: wgpu::TextureFormat,

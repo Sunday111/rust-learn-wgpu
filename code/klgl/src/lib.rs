@@ -5,7 +5,6 @@ pub mod file_loader;
 mod fps_counter;
 mod render_context;
 mod rotator;
-mod settings;
 mod texture;
 
 pub use camera::{Camera, CameraUniform};

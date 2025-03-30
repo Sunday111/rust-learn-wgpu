@@ -1,3 +1,5 @@
+use std::{cell::RefCell, rc::Rc};
+
 use cgmath::{Deg, Transform};
 use klgl::Rotator;
 use tutorial_embedded_content::ILLUMINATI_PNG;
@@ -117,11 +119,13 @@ const PLACEHOLDER_TEXTURE: &[u8] = ILLUMINATI_PNG;
 
 pub struct TextureData {
     path: String,
+    #[allow(dead_code)]
     texture: klgl::Texture,
     bind_group: wgpu::BindGroup,
 }
 
 pub struct ModelsDrawPass {
+    ctx: Rc<RefCell<klgl::RenderContext>>,
     pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
@@ -137,90 +141,110 @@ pub struct ModelsDrawPass {
 impl ModelsDrawPass {
     pub async fn new(
         file_loader: &mut klgl::file_loader::FileLoader,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        render_context: Rc<RefCell<klgl::RenderContext>>,
         camera_bind_group_layout: &wgpu::BindGroupLayout,
-        surface_format: wgpu::TextureFormat,
         depth_stencil_state: Option<wgpu::DepthStencilState>,
     ) -> Self {
         let mut file_loader_endpoint = file_loader.make_endpoint();
 
-        let texture_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+        let texture_bind_group_layout = {
+            let ctx = render_context.borrow();
+            ctx.device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                multisampled: false,
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            },
+                            count: None,
                         },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        // This should match the filterable field of the
-                        // corresponding Texture entry above.
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                ],
-                label: Some("model_draw_pass_texture_bind_group_layout"),
-            });
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            // This should match the filterable field of the
+                            // corresponding Texture entry above.
+                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                            count: None,
+                        },
+                    ],
+                    label: Some("model_draw_pass_texture_bind_group_layout"),
+                })
+        };
 
         // let textures_paths: Vec<String> = (1..=99).map(|i| format!("{:06}.jpg", i)).collect();
         let textures_paths: Vec<String> = vec!["happy-tree.png".into(), "illuminati.png".into()];
 
         let mut textures: Vec<TextureData> = vec![];
 
-        for texture_path in &textures_paths {
-            textures.push(Self::make_texture_data(
-                device,
-                queue,
-                PLACEHOLDER_TEXTURE,
-                texture_path.into(),
-                &texture_bind_group_layout,
-            ));
+        {
+            let ctx = render_context.borrow();
+            for texture_path in &textures_paths {
+                textures.push(Self::make_texture_data(
+                    &ctx.device,
+                    &ctx.queue,
+                    PLACEHOLDER_TEXTURE,
+                    texture_path.into(),
+                    &texture_bind_group_layout,
+                ));
 
-            file_loader_endpoint.request(&texture_path);
+                file_loader_endpoint.request(&texture_path);
+            }
         }
 
         let num_indices = TRIANGLE_INDICES.len();
-        let model_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Index Buffer"),
-            contents: bytemuck::cast_slice(TRIANGLE_INDICES),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let model_index_buffer =
+            render_context
+                .borrow()
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Index Buffer"),
+                    contents: bytemuck::cast_slice(TRIANGLE_INDICES),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
 
-        let models_pipeline = ModelsDrawPass::create_render_pipeline(
-            &device,
-            &camera_bind_group_layout,
-            &texture_bind_group_layout,
-            surface_format,
-            depth_stencil_state,
-        );
+        let models_pipeline = {
+            let ctx = render_context.borrow();
+            ModelsDrawPass::create_render_pipeline(
+                &ctx.device,
+                &camera_bind_group_layout,
+                &texture_bind_group_layout,
+                ctx.config.format,
+                depth_stencil_state,
+            )
+        };
 
         let mut model_instances: Vec<Instance> = vec![];
         Self::compute_model_instances(&mut model_instances, Deg(45.0));
 
-        let model_instances_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Instance Buffer"),
-            contents: bytemuck::cast_slice(&model_instances),
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        });
+        let model_instances_buffer =
+            render_context
+                .borrow()
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Instance Buffer"),
+                    contents: bytemuck::cast_slice(&model_instances),
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                });
 
         let mut tri_vert: [ModelVertex; 3] = TRIANGLE_VERTICES.into();
         transform_model(&mut tri_vert);
 
-        let model_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("ModelVertex Buffer"),
-            contents: bytemuck::cast_slice(&tri_vert),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+        let model_vertex_buffer =
+            render_context
+                .borrow()
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("ModelVertex Buffer"),
+                    contents: bytemuck::cast_slice(&tri_vert),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
 
         Self {
+            ctx: render_context,
             pipeline: models_pipeline,
             vertex_buffer: model_vertex_buffer,
             index_buffer: model_index_buffer,
@@ -291,7 +315,7 @@ impl ModelsDrawPass {
         }));
     }
 
-    pub fn update(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, angle: Deg<f32>) {
+    pub fn update(&mut self, angle: Deg<f32>) {
         while let Ok(file_data) = self.file_loader_endpoint.receiver.try_recv() {
             let texture_path = self
                 .file_loader_endpoint
@@ -301,9 +325,10 @@ impl ModelsDrawPass {
 
             match self.textures.iter().position(|x| x.path == texture_path) {
                 Some(index) => {
+                    let ctx = self.ctx.borrow();
                     self.textures[index] = Self::make_texture_data(
-                        &device,
-                        queue,
+                        &ctx.device,
+                        &ctx.queue,
                         &file_data.data,
                         texture_path,
                         &self.texture_bind_group_layout,
@@ -319,14 +344,14 @@ impl ModelsDrawPass {
         }
 
         Self::compute_model_instances(&mut self.instances, angle);
-        queue.write_buffer(
+        self.ctx.borrow().queue.write_buffer(
             &self.instances_buffer,
             0,
             bytemuck::cast_slice(&self.instances[..]),
         );
     }
 
-    pub fn create_render_pipeline(
+    fn create_render_pipeline(
         device: &wgpu::Device,
         camera_bind_group_layout: &wgpu::BindGroupLayout,
         texture_bind_group_layout: &wgpu::BindGroupLayout,
@@ -386,7 +411,7 @@ impl ModelsDrawPass {
         })
     }
 
-    pub fn swap_model(&mut self, device: &wgpu::Device) {
+    pub fn swap_model(&mut self) {
         let (vertices, indices) = {
             if self.num_indices == TRIANGLE_INDICES.len() as u32 {
                 let mut hex_vert: [ModelVertex; 5] = HEX_VERTICES.into();
@@ -399,17 +424,22 @@ impl ModelsDrawPass {
             }
         };
 
-        self.vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("ModelVertex Buffer"),
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+        let ctx = self.ctx.borrow();
+        self.vertex_buffer = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("ModelVertex Buffer"),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
 
-        self.index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Index Buffer"),
-            contents: bytemuck::cast_slice(indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        self.index_buffer = ctx
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Index Buffer"),
+                contents: bytemuck::cast_slice(indices),
+                usage: wgpu::BufferUsages::INDEX,
+            });
 
         self.num_indices = indices.len() as u32;
     }
