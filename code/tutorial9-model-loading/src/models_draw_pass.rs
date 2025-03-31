@@ -178,22 +178,27 @@ impl ModelsDrawPass {
         // let textures_paths: Vec<String> = (1..=99).map(|i| format!("{:06}.jpg", i)).collect();
         let textures_paths: Vec<String> = vec!["happy-tree.png".into(), "illuminati.png".into()];
 
-        let mut textures: Vec<TextureData> = vec![];
-
-        {
+        // Create placeholder textures
+        let textures: Vec<TextureData> = {
             let ctx = render_context.borrow();
-            for texture_path in &textures_paths {
-                textures.push(Self::make_texture_data(
-                    &ctx.device,
-                    &ctx.queue,
-                    PLACEHOLDER_TEXTURE,
-                    texture_path.into(),
-                    &texture_bind_group_layout,
-                ));
+            textures_paths
+                .iter()
+                .map(|path| {
+                    Self::make_texture_data(
+                        &ctx.device,
+                        &ctx.queue,
+                        PLACEHOLDER_TEXTURE,
+                        path.into(),
+                        &texture_bind_group_layout,
+                    )
+                })
+                .collect()
+        };
 
-                file_loader_endpoint.request(&texture_path);
-            }
-        }
+        // Request real textures
+        textures_paths
+            .iter()
+            .for_each(|x| file_loader_endpoint.request(x));
 
         let num_indices = TRIANGLE_INDICES.len();
         let model_index_buffer =
