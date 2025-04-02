@@ -1409,7 +1409,7 @@ dependencies = [
  "num-traits",
  "pollster",
  "reqwest",
- "tobj",
+ "tobj 3.2.5",
  "wasm-bindgen-futures",
  "web-sys",
  "web-time",
@@ -2702,6 +2702,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57381207291289bad19de63acd3fbf5948ff99b2868116c367b7224c37d55f90"
 
 [[package]]
+name = "tobj"
+version = "4.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04aca6092e5978e708ee784e8ab9b5cf3cdb598b28f99a2f257446e7081a7025"
+
+[[package]]
 name = "tokio"
 version = "1.44.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2954,7 +2960,7 @@ dependencies = [
  "klgl",
  "log",
  "pollster",
- "tobj",
+ "tobj 4.0.3",
  "tutorial-embedded-content",
  "wasm-bindgen-futures",
  "web-sys",
