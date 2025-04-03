@@ -65,52 +65,65 @@ pub struct Mesh {
     pub material: usize,
 }
 
-fn get_value_from_map<'a, K, V, S, Q>(map: &'a HashMap<K, V, S>, key: &Q) -> anyhow::Result<&'a V>
+fn get_value_from_map<'Map, Key, Value, Hasher, Query>(
+    map: &'Map HashMap<Key, Value, Hasher>,
+    key: &Query,
+) -> anyhow::Result<&'Map Value>
 where
-    K: Eq + std::hash::Hash,
-    S: std::hash::BuildHasher,
-    K: std::borrow::Borrow<Q>,
-    Q: ?Sized + std::hash::Hash + std::cmp::Eq + std::fmt::Debug,
+    Key: Eq + std::hash::Hash,
+    Hasher: std::hash::BuildHasher,
+    Key: std::borrow::Borrow<Query>,
+    Query: ?Sized + std::hash::Hash + std::cmp::Eq + std::fmt::Debug,
 {
     map.get(key)
-        .ok_or_else(|| anyhow::anyhow!("Key '{:?}' not found in the map", key))
+        .ok_or_else(|| anyhow::anyhow!("Could not find '{:?}' in the map", key))
 }
 
-pub fn load_model(
+pub async fn load_texture(
+    file_name: &Path,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) -> anyhow::Result<klgl::Texture> {
+    let data = klgl::file_loader::load_binary(file_name).await?;
+    let file_name_str = file_name
+        .to_str()
+        .ok_or_else(|| anyhow::anyhow!("Failed to take option value"))?;
+    klgl::Texture::from_bytes(device, queue, &data, &file_name_str)
+}
+
+pub async fn load_model(
     file_name: &str,
     ctx: &klgl::RenderContext,
     layout: &wgpu::BindGroupLayout,
-    file_data_map: &HashMap<PathBuf, klgl::file_loader::FileDataHandle>,
 ) -> anyhow::Result<Model> {
-    let (models, obj_materials) = {
-        let obj_file = get_value_from_map(file_data_map, Path::new(file_name))?;
-        let obj_cursor = Cursor::new(&obj_file.data);
-        let mut obj_reader = BufReader::new(obj_cursor);
+    let obj_text = klgl::file_loader::load_string(file_name).await?;
+    let obj_cursor = Cursor::new(obj_text);
+    let mut obj_reader = BufReader::new(obj_cursor);
 
-        tobj::load_obj_buf(
-            &mut obj_reader,
-            &tobj::LoadOptions {
-                triangulate: true,
-                single_index: true,
-                ..Default::default()
-            },
-            |p| match file_data_map.get(p) {
-                Some(file_data) => {
-                    tobj::load_mtl_buf(&mut BufReader::new(Cursor::new(&file_data.data)))
-                }
-                None => Err(tobj::LoadError::OpenFileFailed),
-            },
-        )
-    }?;
+    let path_buf = PathBuf::from(String::from(file_name));
+    let root_path = path_buf.parent().unwrap();
+
+    let (models, obj_materials) = tobj::load_obj_buf_async(
+        &mut obj_reader,
+        &tobj::LoadOptions {
+            triangulate: true,
+            single_index: true,
+            ..Default::default()
+        },
+        |p| async move {
+            let mp = root_path.join(p);
+            let mat_text = klgl::file_loader::load_string(mp).await.unwrap();
+            tobj::load_mtl_buf(&mut BufReader::new(Cursor::new(mat_text)))
+        },
+    )
+    .await?;
 
     let mut materials = Vec::new();
     for m in obj_materials? {
-        let diffuse_path = &m
-            .diffuse_texture
-            .ok_or_else(|| anyhow::anyhow!("Null diffuse texture for {}", file_name))?;
-        let texture_file = get_value_from_map(file_data_map, Path::new(&diffuse_path))?.clone();
-        let diffuse_texture =
-            klgl::Texture::from_bytes(&ctx.device, &ctx.queue, &texture_file.data, &diffuse_path)?;
+        let diffuse_texture_path = root_path.join(&m.diffuse_texture.ok_or_else(|| {
+            anyhow::anyhow!("obj file ({}) with empty texture reference", file_name)
+        })?);
+        let diffuse_texture = load_texture(&diffuse_texture_path, &ctx.device, &ctx.queue).await?;
         let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout,
             entries: &[

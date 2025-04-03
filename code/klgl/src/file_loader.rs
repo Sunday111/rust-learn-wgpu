@@ -9,45 +9,35 @@ fn format_url(file_name: &str) -> reqwest::Url {
     reqwest::Url::parse(&format!("{}/res/{}", path, file_name)).unwrap()
 }
 
-pub async fn load_string(file_name: &str) -> anyhow::Result<String> {
+pub async fn load_string<P: AsRef<std::path::Path>>(file_name: P) -> anyhow::Result<String> {
     cfg_if! {
         if #[cfg(target_arch = "wasm32")] {
             let url = format_url(file_name);
-            let txt = reqwest::get(url)
+            Ok(reqwest::get(url)
                 .await?
                 .text()
-                .await?;
+                .await?);
         } else {
-            let path = std::path::Path::new(env!("OUT_DIR"))
-                .join("res")
-                .join(file_name);
-
-            let txt = std::fs::read_to_string(path)?;
+            let path = std::path::PathBuf::from(env!("OUT_DIR")).join("res").join(file_name);
+            std::fs::read_to_string(&path).map_err(|err| anyhow::anyhow!("Failed to read {:?}. Error: {:?}", path, err))
         }
     }
-
-    Ok(txt)
 }
 
-pub async fn load_binary(file_name: &str) -> anyhow::Result<Vec<u8>> {
+pub async fn load_binary<P: AsRef<std::path::Path>>(file_name: P) -> anyhow::Result<Vec<u8>> {
     cfg_if! {
         if #[cfg(target_arch = "wasm32")] {
             let url = format_url(file_name);
-            let data = reqwest::get(url)
+            Ok(reqwest::get(url)
                 .await?
                 .bytes()
                 .await?
-                .to_vec();
+                .to_vec());
         } else {
-            let path = std::path::Path::new(env!("OUT_DIR"))
-                .join("res")
-                .join(file_name);
-            // log::info!("Reading \"{:?}\"", path);
-            let data = std::fs::read(path)?;
+            let path = std::path::PathBuf::from(env!("OUT_DIR")).join("res").join(file_name);
+            std::fs::read(&path).map_err(|err| anyhow::anyhow!("Failed to read {:?}. Error: {:?}", path, err))
         }
     }
-
-    Ok(data)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -281,9 +271,7 @@ impl FileLoaderEndpoint {
             let x = x.clone();
             let loader_fn = async move {
                 match sender.send(x.clone()).await {
-                    Ok(_) => {
-                        log::info!("Its ok");
-                    }
+                    Ok(_) => {}
                     Err(err) => {
                         log::error!("Failed to load . Error: \"{}\"", err);
                     }

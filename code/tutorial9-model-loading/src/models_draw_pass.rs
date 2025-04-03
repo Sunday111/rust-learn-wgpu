@@ -5,7 +5,7 @@ use klgl::Rotator;
 use tutorial_embedded_content::ILLUMINATI_PNG;
 use wgpu::util::DeviceExt;
 
-use crate::model::{ModelVertex, Vertex};
+use crate::model::{self, ModelVertex, Vertex};
 
 fn transform_model(vertices: &mut [ModelVertex]) {
     let rm = Rotator {
@@ -136,6 +136,7 @@ pub struct ModelsDrawPass {
     textures: Vec<TextureData>,
     active_texture: u32,
     file_loader_endpoint: klgl::file_loader::FileLoaderEndpoint,
+    model: crate::model::Model,
 }
 
 impl ModelsDrawPass {
@@ -248,6 +249,22 @@ impl ModelsDrawPass {
                     usage: wgpu::BufferUsages::VERTEX,
                 });
 
+        let model_path = "models/cube/cube.obj";
+        let model = match crate::model::load_model(
+            model_path,
+            &render_context.borrow(),
+            &texture_bind_group_layout,
+        )
+        .await
+        {
+            Ok(val) => Ok(val),
+            Err(err) => {
+                log::error!("{}", err);
+                Err(err)
+            }
+        }
+        .expect(&format!("Failed to load model {}", model_path));
+
         Self {
             ctx: render_context,
             pipeline: models_pipeline,
@@ -260,6 +277,7 @@ impl ModelsDrawPass {
             textures,
             active_texture: 0,
             file_loader_endpoint,
+            model,
         }
     }
 
