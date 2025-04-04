@@ -1,22 +1,27 @@
+use async_std::path::PathBuf;
 use cfg_if::cfg_if;
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc};
 
 #[cfg(target_arch = "wasm32")]
-fn format_url(file_name: &str) -> reqwest::Url {
+fn format_url<P: AsRef<std::path::Path>>(file_name: P) -> anyhow::Result<reqwest::Url> {
     let window: web_sys::Window = web_sys::window().unwrap();
     let location: String = window.location().href().unwrap();
-    let path: &str = &location[..location.rfind("/").unwrap() + 1];
-    reqwest::Url::parse(&format!("{}/res/{}", path, file_name)).unwrap()
+    let location_path = std::path::Path::new(&location[..location.rfind("/").unwrap() + 1]);
+    let path = location_path.join("res").join(file_name);
+    match path.to_str() {
+        Some(path_str) => Ok(reqwest::Url::parse(path_str)?),
+        None => Err(anyhow::anyhow!("Could not convert path {:?} to str", path)),
+    }
 }
 
 pub async fn load_string<P: AsRef<std::path::Path>>(file_name: P) -> anyhow::Result<String> {
     cfg_if! {
         if #[cfg(target_arch = "wasm32")] {
-            let url = format_url(file_name);
+            let url = format_url(file_name)?;
             Ok(reqwest::get(url)
                 .await?
                 .text()
-                .await?);
+                .await?)
         } else {
             let path = std::path::PathBuf::from(env!("OUT_DIR")).join("res").join(file_name);
             std::fs::read_to_string(&path).map_err(|err| anyhow::anyhow!("Failed to read {:?}. Error: {:?}", path, err))
@@ -27,12 +32,12 @@ pub async fn load_string<P: AsRef<std::path::Path>>(file_name: P) -> anyhow::Res
 pub async fn load_binary<P: AsRef<std::path::Path>>(file_name: P) -> anyhow::Result<Vec<u8>> {
     cfg_if! {
         if #[cfg(target_arch = "wasm32")] {
-            let url = format_url(file_name);
+            let url = format_url(file_name)?;
             Ok(reqwest::get(url)
                 .await?
                 .bytes()
                 .await?
-                .to_vec());
+                .to_vec())
         } else {
             let path = std::path::PathBuf::from(env!("OUT_DIR")).join("res").join(file_name);
             std::fs::read(&path).map_err(|err| anyhow::anyhow!("Failed to read {:?}. Error: {:?}", path, err))
