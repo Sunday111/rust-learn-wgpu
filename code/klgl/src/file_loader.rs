@@ -3,10 +3,10 @@ use cfg_if::cfg_if;
 use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc};
 
 #[cfg(target_arch = "wasm32")]
-fn format_url<P: AsRef<std::path::Path>>(file_name: P) -> anyhow::Result<reqwest::Url> {
+fn format_url<P: AsRef<Path>>(file_name: P) -> anyhow::Result<reqwest::Url> {
     let window: web_sys::Window = web_sys::window().unwrap();
     let location: String = window.location().href().unwrap();
-    let location_path = std::path::Path::new(&location[..location.rfind("/").unwrap() + 1]);
+    let location_path = Path::new(&location[..location.rfind("/").unwrap() + 1]);
     let path = location_path.join("res").join(file_name);
     match path.to_str() {
         Some(path_str) => Ok(reqwest::Url::parse(path_str)?),
@@ -14,7 +14,7 @@ fn format_url<P: AsRef<std::path::Path>>(file_name: P) -> anyhow::Result<reqwest
     }
 }
 
-pub async fn load_string<P: AsRef<std::path::Path>>(file_name: P) -> anyhow::Result<String> {
+pub async fn load_string<P: AsRef<Path>>(file_name: P) -> anyhow::Result<String> {
     cfg_if! {
         if #[cfg(target_arch = "wasm32")] {
             let url = format_url(file_name)?;
@@ -29,7 +29,7 @@ pub async fn load_string<P: AsRef<std::path::Path>>(file_name: P) -> anyhow::Res
     }
 }
 
-pub async fn load_binary<P: AsRef<std::path::Path>>(file_name: P) -> anyhow::Result<Vec<u8>> {
+pub async fn load_binary<P: AsRef<Path>>(file_name: P) -> anyhow::Result<Vec<u8>> {
     cfg_if! {
         if #[cfg(target_arch = "wasm32")] {
             let url = format_url(file_name)?;
@@ -133,15 +133,42 @@ impl FileLoader {
     }
 
     pub fn try_get_file(&self, path: &str) -> Option<FileDataHandle> {
-        let inner = self.inner.borrow_mut();
+        self.inner
+            .borrow()
+            .file_id_map
+            .get_by_left(path)
+            .and_then(|id| self.try_get_by_id(id))
+    }
 
-        match inner.file_id_map.get_by_left(path) {
-            Some(id) => match inner.ready_files.get(id) {
-                Some(file) => Some(file.clone()),
-                None => None,
-            },
-            None => None,
+    pub fn try_get_by_id(&self, id: &FileId) -> Option<FileDataHandle> {
+        self.inner
+            .borrow()
+            .ready_files
+            .get(id)
+            .and_then(|x| Some(x.clone()))
+    }
+
+    pub async fn get_file_async(&mut self, path: &str) -> anyhow::Result<FileDataHandle> {
+        let id = self.inner.borrow_mut().find_or_add_file_id(path);
+        if let Some(file_data) = self.inner.borrow_mut().ready_files.get(&id) {
+            return Ok(file_data.clone());
         }
+
+        if let Some(_) = self.inner.borrow().pending_files.get(&id) {
+            return Err(anyhow::anyhow!(
+                "Could not request file asynchronously because it is already in pending list. These two ways are mutually exclusive"
+            ));
+        }
+
+        let data = load_binary(&path).await?;
+
+        // Add to ready files
+        self.inner
+            .borrow_mut()
+            .ready_files
+            .insert(id, FileDataHandle::new(FileData { id, data }));
+
+        Ok(self.inner.borrow().ready_files.get(&id).unwrap().clone())
     }
 
     pub fn get_or_request<Callback>(&mut self, path: &str, callback: Callback) -> FileId

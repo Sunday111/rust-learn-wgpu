@@ -3,8 +3,10 @@ use std::{
     io::{BufReader, Cursor},
     path::{Path, PathBuf},
     rc::Rc,
+    sync::Arc,
 };
 
+use klgl::file_loader::{self, FileDataHandle};
 use wgpu::util::DeviceExt;
 
 pub trait Vertex {
@@ -79,51 +81,82 @@ where
         .ok_or_else(|| anyhow::anyhow!("Could not find '{:?}' in the map", key))
 }
 
-pub async fn load_texture(
-    file_name: &Path,
+fn get_preloaded_file(
+    file_loader: &klgl::file_loader::FileLoader,
+    path: &str,
+) -> anyhow::Result<FileDataHandle> {
+    file_loader
+        .try_get_file(&path)
+        .ok_or_else(|| anyhow::anyhow!(""))
+}
+
+pub fn get_preloaded_texture(
+    file_loader: &klgl::file_loader::FileLoader,
+    path: &str,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
 ) -> anyhow::Result<klgl::Texture> {
-    let data = klgl::file_loader::load_binary(file_name).await?;
-    let file_name_str = file_name
-        .to_str()
-        .ok_or_else(|| anyhow::anyhow!("Failed to take option value"))?;
-    klgl::Texture::from_bytes(device, queue, &data, &file_name_str)
+    let file_data = get_preloaded_file(file_loader, path)?;
+    klgl::Texture::from_bytes(device, queue, &file_data.data, path)
 }
 
-pub async fn load_model(
-    file_name: &str,
+pub fn to_posix_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+pub fn load_model(
+    obj_file_name: &str,
+    file_map: &HashMap<String, FileDataHandle>,
     ctx: &klgl::RenderContext,
     layout: &wgpu::BindGroupLayout,
 ) -> anyhow::Result<Model> {
-    let obj_text = klgl::file_loader::load_string(file_name).await?;
-    let obj_cursor = Cursor::new(obj_text);
+    let obj_file_handle = get_value_from_map(file_map, obj_file_name)?;
+    let obj_cursor = Cursor::new(&obj_file_handle.data);
     let mut obj_reader = BufReader::new(obj_cursor);
 
-    let path_buf = PathBuf::from(String::from(file_name));
+    let path_buf = PathBuf::from(String::from(obj_file_name));
     let root_path = path_buf.parent().unwrap();
 
-    let (models, obj_materials) = tobj::load_obj_buf_async(
+    let (models, obj_materials) = tobj::load_obj_buf(
         &mut obj_reader,
         &tobj::LoadOptions {
             triangulate: true,
             single_index: true,
             ..Default::default()
         },
-        |p| async move {
-            let mp = root_path.join(p);
-            let mat_text = klgl::file_loader::load_string(mp).await.unwrap();
-            tobj::load_mtl_buf(&mut BufReader::new(Cursor::new(mat_text)))
+        |p| {
+            let file_path = root_path.join(p);
+            let file_path_str = to_posix_path(&file_path);
+            match get_value_from_map(file_map, &file_path_str) {
+                Ok(file_data) => {
+                    tobj::load_mtl_buf(&mut BufReader::new(Cursor::new(&file_data.data)))
+                }
+                Err(err) => {
+                    log::error!(
+                        "Failed to find a file {} required for model {}. It was expected that is was already preloaded by this point. Error: {}",
+                        file_path_str,
+                        obj_file_name,
+                        err
+                    );
+                    Err(tobj::LoadError::OpenFileFailed)
+                }
+            }
         },
-    )
-    .await?;
+    )?;
 
     let mut materials = Vec::new();
     for m in obj_materials? {
         let diffuse_texture_path = root_path.join(&m.diffuse_texture.ok_or_else(|| {
-            anyhow::anyhow!("obj file ({}) with empty texture reference", file_name)
+            anyhow::anyhow!("obj file ({}) with empty texture reference", obj_file_name)
         })?);
-        let diffuse_texture = load_texture(&diffuse_texture_path, &ctx.device, &ctx.queue).await?;
+        let diffuse_texture_path_str = to_posix_path(&diffuse_texture_path);
+        let diffuse_texture_file_handle = get_value_from_map(file_map, &diffuse_texture_path_str)?;
+        let diffuse_texture = klgl::Texture::from_bytes(
+            &ctx.device,
+            &ctx.queue,
+            &diffuse_texture_file_handle.data,
+            &diffuse_texture_path_str,
+        )?;
         let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout,
             entries: &[
@@ -188,20 +221,20 @@ pub async fn load_model(
             let vertex_buffer = ctx
                 .device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some(&format!("{:?} Vertex Buffer", file_name)),
+                    label: Some(&format!("{:?} Vertex Buffer", obj_file_name)),
                     contents: bytemuck::cast_slice(&vertices),
                     usage: wgpu::BufferUsages::VERTEX,
                 });
             let index_buffer = ctx
                 .device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some(&format!("{:?} Index Buffer", file_name)),
+                    label: Some(&format!("{:?} Index Buffer", obj_file_name)),
                     contents: bytemuck::cast_slice(&m.mesh.indices),
                     usage: wgpu::BufferUsages::INDEX,
                 });
 
             Mesh {
-                name: file_name.to_string(),
+                name: obj_file_name.to_string(),
                 vertex_buffer,
                 index_buffer,
                 num_elements: m.mesh.indices.len() as u32,

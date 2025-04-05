@@ -1,7 +1,16 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    rc::Rc,
+};
 
+use async_std::path::PathBuf;
 use cgmath::{Deg, Transform};
-use klgl::Rotator;
+use klgl::{
+    Rotator,
+    file_loader::{self, FileDataHandle, FileId, FileLoader},
+};
+use log::info;
 use tutorial_embedded_content::ILLUMINATI_PNG;
 use wgpu::util::DeviceExt;
 
@@ -136,7 +145,67 @@ pub struct ModelsDrawPass {
     textures: Vec<TextureData>,
     active_texture: u32,
     file_loader_endpoint: klgl::file_loader::FileLoaderEndpoint,
-    model: crate::model::Model,
+    loading_model: Option<LoadingModel>,
+    model: Option<crate::model::Model>,
+}
+
+struct LoadingModel {
+    endpoint: klgl::file_loader::FileLoaderEndpoint,
+    received: HashMap<String, FileDataHandle>,
+    remaining: u16,
+    obj_path: String,
+    bind_group_layout: wgpu::BindGroupLayout,
+}
+
+impl LoadingModel {
+    pub fn new(
+        file_loader: &mut klgl::file_loader::FileLoader,
+        obj_path: &str,
+        bind_group_layout: wgpu::BindGroupLayout,
+        requirements: &[&str],
+    ) -> Self {
+        let mut endpoint = file_loader.make_endpoint();
+        let remaining = (requirements.len() as u16) + 1;
+        endpoint.request(obj_path);
+        for requirement in requirements {
+            endpoint.request(&requirement);
+        }
+
+        Self {
+            endpoint,
+            obj_path: obj_path.into(),
+            remaining,
+            received: HashMap::new(),
+            bind_group_layout,
+        }
+    }
+
+    pub fn ready(&self) -> bool {
+        self.remaining == 0
+    }
+
+    pub fn update(&mut self) {
+        while let Ok(file_handle) = self.endpoint.receiver.try_recv() {
+            let path = self.endpoint.loader.path_by_id(file_handle.id).unwrap();
+            self.received.insert(path, file_handle);
+            if self.remaining > 0 {
+                self.remaining -= 1;
+            }
+        }
+    }
+
+    pub fn get(&self, ctx: &klgl::RenderContext) -> Option<anyhow::Result<crate::model::Model>> {
+        if !self.ready() {
+            return None;
+        }
+
+        Some(crate::model::load_model(
+            &self.obj_path,
+            &self.received,
+            ctx,
+            &self.bind_group_layout,
+        ))
+    }
 }
 
 impl ModelsDrawPass {
@@ -250,20 +319,18 @@ impl ModelsDrawPass {
                 });
 
         let model_path = "models/cube/cube.obj";
-        let model = match crate::model::load_model(
+        let model_requirements = [
+            "models/cube/cube.mtl",
+            "models/cube/cube-diffuse.jpg",
+            "models/cube/cube-normal.png",
+        ];
+
+        let loading_model = Some(LoadingModel::new(
+            &mut file_loader.clone(),
             model_path,
-            &render_context.borrow(),
-            &texture_bind_group_layout,
-        )
-        .await
-        {
-            Ok(val) => Ok(val),
-            Err(err) => {
-                log::error!("{}", err);
-                Err(err)
-            }
-        }
-        .expect(&format!("Failed to load model {}", model_path));
+            texture_bind_group_layout.clone(),
+            &model_requirements,
+        ));
 
         Self {
             ctx: render_context,
@@ -277,7 +344,8 @@ impl ModelsDrawPass {
             textures,
             active_texture: 0,
             file_loader_endpoint,
-            model,
+            loading_model,
+            model: None,
         }
     }
 
@@ -363,6 +431,29 @@ impl ModelsDrawPass {
                         texture_path
                     );
                 }
+            }
+        }
+
+        if let Some(loading_model) = &mut self.loading_model {
+            loading_model.update();
+            self.model = match loading_model.get(&self.ctx.borrow_mut()) {
+                Some(model_result) => match model_result {
+                    Ok(model) => {
+                        log::info!("Model successfully loaded: {}", loading_model.obj_path);
+                        self.loading_model = None;
+                        Some(model)
+                    }
+                    Err(err) => {
+                        log::error!(
+                            "Failed to load model {}. Error: {}",
+                            loading_model.obj_path,
+                            err
+                        );
+                        self.loading_model = None;
+                        None
+                    }
+                },
+                None => None,
             }
         }
 
