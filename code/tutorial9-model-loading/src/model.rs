@@ -3,11 +3,9 @@ use std::{
     io::{BufReader, Cursor},
     ops::Range,
     path::{Path, PathBuf},
-    rc::Rc,
-    sync::Arc,
 };
 
-use klgl::file_loader::{self, FileDataHandle};
+use klgl::file_loader::FileDataHandle;
 use wgpu::util::DeviceExt;
 
 pub trait Vertex {
@@ -79,6 +77,20 @@ impl Mesh {
     }
 }
 
+impl Model {
+    pub fn draw_instanced(
+        &self,
+        render_pass: &mut wgpu::RenderPass,
+        camera_bind_group: &wgpu::BindGroup,
+        instances: Range<u32>,
+    ) {
+        for mesh in &self.meshes {
+            let material = &self.materials[mesh.material];
+            mesh.draw_instanced(render_pass, camera_bind_group, material, instances.clone());
+        }
+    }
+}
+
 pub struct Material {
     pub name: String,
     pub diffuse_texture: klgl::Texture,
@@ -93,10 +105,10 @@ pub struct Mesh {
     pub material: usize,
 }
 
-fn get_value_from_map<'Map, Key, Value, Hasher, Query>(
-    map: &'Map HashMap<Key, Value, Hasher>,
+fn get_value_from_map<'map, Key, Value, Hasher, Query>(
+    map: &'map HashMap<Key, Value, Hasher>,
     key: &Query,
-) -> anyhow::Result<&'Map Value>
+) -> anyhow::Result<&'map Value>
 where
     Key: Eq + std::hash::Hash,
     Hasher: std::hash::BuildHasher,
@@ -105,25 +117,6 @@ where
 {
     map.get(key)
         .ok_or_else(|| anyhow::anyhow!("Could not find '{:?}' in the map", key))
-}
-
-fn get_preloaded_file(
-    file_loader: &klgl::file_loader::FileLoader,
-    path: &str,
-) -> anyhow::Result<FileDataHandle> {
-    file_loader
-        .try_get_file(&path)
-        .ok_or_else(|| anyhow::anyhow!(""))
-}
-
-pub fn get_preloaded_texture(
-    file_loader: &klgl::file_loader::FileLoader,
-    path: &str,
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-) -> anyhow::Result<klgl::Texture> {
-    let file_data = get_preloaded_file(file_loader, path)?;
-    klgl::Texture::from_bytes(device, queue, &file_data.data, path)
 }
 
 pub fn to_posix_path(path: &Path) -> String {

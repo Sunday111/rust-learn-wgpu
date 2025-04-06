@@ -575,26 +575,14 @@ impl ModelsDrawPass {
     }
 
     pub fn render(&self, render_pass: &mut wgpu::RenderPass, camera_bind_group: &wgpu::BindGroup) {
-        // let texture = &self.textures[self.active_texture as usize];
-        // render_pass.set_pipeline(&self.pipeline);
-        // render_pass.set_bind_group(0, &texture.bind_group, &[]);
-        // render_pass.set_bind_group(1, camera_bind_group, &[]);
-        // render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        // render_pass.set_vertex_buffer(1, self.instances_buffer.slice(..));
-        // render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-        // render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as _);
-
         if let Some(model) = &self.model {
-            for mesh in &model.meshes {
-                render_pass.set_pipeline(&self.pipeline);
-                render_pass.set_vertex_buffer(1, self.instances_buffer.slice(..));
-                mesh.draw_instanced(
-                    render_pass,
-                    camera_bind_group,
-                    &model.materials[mesh.material],
-                    0..self.instances.len() as u32,
-                );
-            }
+            render_pass.set_pipeline(&self.pipeline);
+            render_pass.set_vertex_buffer(1, self.instances_buffer.slice(..));
+            model.draw_instanced(
+                render_pass,
+                camera_bind_group,
+                0..self.instances.len() as u32,
+            );
         }
     }
 }
