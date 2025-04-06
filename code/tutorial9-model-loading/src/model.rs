@@ -8,8 +8,47 @@ use std::{
 use klgl::file_loader::FileDataHandle;
 use wgpu::util::DeviceExt;
 
+fn get_value_from_map<'map, Key, Value, Hasher, Query>(
+    map: &'map HashMap<Key, Value, Hasher>,
+    key: &Query,
+) -> anyhow::Result<&'map Value>
+where
+    Key: Eq + std::hash::Hash,
+    Hasher: std::hash::BuildHasher,
+    Key: std::borrow::Borrow<Query>,
+    Query: ?Sized + std::hash::Hash + std::cmp::Eq + std::fmt::Debug,
+{
+    map.get(key)
+        .ok_or_else(|| anyhow::anyhow!("Could not find '{:?}' in the map", key))
+}
+
+fn to_posix_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
 pub trait Vertex {
     fn layout() -> wgpu::VertexBufferLayout<'static>;
+}
+
+#[allow(dead_code)]
+pub struct Material {
+    pub name: String,
+    pub diffuse_texture: klgl::Texture,
+    pub bind_group: wgpu::BindGroup,
+}
+
+#[allow(dead_code)]
+pub struct Mesh {
+    pub name: String,
+    pub vertex_buffer: wgpu::Buffer,
+    pub index_buffer: wgpu::Buffer,
+    pub num_elements: u32,
+    pub material: usize,
+}
+
+pub struct Model {
+    pub meshes: Vec<Mesh>,
+    pub materials: Vec<Material>,
 }
 
 #[repr(C)]
@@ -47,12 +86,8 @@ impl Vertex for ModelVertex {
     }
 }
 
-pub struct Model {
-    pub meshes: Vec<Mesh>,
-    pub materials: Vec<Material>,
-}
-
 impl Mesh {
+    #[allow(dead_code)]
     pub fn draw(
         &self,
         render_pass: &mut wgpu::RenderPass,
@@ -89,178 +124,147 @@ impl Model {
             mesh.draw_instanced(render_pass, camera_bind_group, material, instances.clone());
         }
     }
-}
 
-pub struct Material {
-    pub name: String,
-    pub diffuse_texture: klgl::Texture,
-    pub bind_group: wgpu::BindGroup,
-}
+    pub fn load(
+        obj_file_name: &str,
+        file_map: &HashMap<String, FileDataHandle>,
+        ctx: &klgl::RenderContext,
+        layout: &wgpu::BindGroupLayout,
+    ) -> anyhow::Result<Model> {
+        let obj_file_handle = get_value_from_map(file_map, obj_file_name)?;
+        let obj_cursor = Cursor::new(&obj_file_handle.data);
+        let mut obj_reader = BufReader::new(obj_cursor);
 
-pub struct Mesh {
-    pub name: String,
-    pub vertex_buffer: wgpu::Buffer,
-    pub index_buffer: wgpu::Buffer,
-    pub num_elements: u32,
-    pub material: usize,
-}
+        let path_buf = PathBuf::from(String::from(obj_file_name));
+        let root_path = path_buf.parent().unwrap();
 
-fn get_value_from_map<'map, Key, Value, Hasher, Query>(
-    map: &'map HashMap<Key, Value, Hasher>,
-    key: &Query,
-) -> anyhow::Result<&'map Value>
-where
-    Key: Eq + std::hash::Hash,
-    Hasher: std::hash::BuildHasher,
-    Key: std::borrow::Borrow<Query>,
-    Query: ?Sized + std::hash::Hash + std::cmp::Eq + std::fmt::Debug,
-{
-    map.get(key)
-        .ok_or_else(|| anyhow::anyhow!("Could not find '{:?}' in the map", key))
-}
-
-pub fn to_posix_path(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
-}
-
-pub fn load_model(
-    obj_file_name: &str,
-    file_map: &HashMap<String, FileDataHandle>,
-    ctx: &klgl::RenderContext,
-    layout: &wgpu::BindGroupLayout,
-) -> anyhow::Result<Model> {
-    let obj_file_handle = get_value_from_map(file_map, obj_file_name)?;
-    let obj_cursor = Cursor::new(&obj_file_handle.data);
-    let mut obj_reader = BufReader::new(obj_cursor);
-
-    let path_buf = PathBuf::from(String::from(obj_file_name));
-    let root_path = path_buf.parent().unwrap();
-
-    let (models, obj_materials) = tobj::load_obj_buf(
-        &mut obj_reader,
-        &tobj::LoadOptions {
-            triangulate: true,
-            single_index: true,
-            ..Default::default()
-        },
-        |p| {
-            let file_path = root_path.join(p);
-            let file_path_str = to_posix_path(&file_path);
-            match get_value_from_map(file_map, &file_path_str) {
-                Ok(file_data) => {
-                    tobj::load_mtl_buf(&mut BufReader::new(Cursor::new(&file_data.data)))
-                }
-                Err(err) => {
-                    log::error!(
-                        "Failed to find a file {} required for model {}. It was expected that is was already preloaded by this point. Error: {}",
-                        file_path_str,
-                        obj_file_name,
-                        err
-                    );
-                    Err(tobj::LoadError::OpenFileFailed)
-                }
-            }
-        },
-    )?;
-
-    let mut materials = Vec::new();
-    for m in obj_materials? {
-        let diffuse_texture_path = root_path.join(&m.diffuse_texture.ok_or_else(|| {
-            anyhow::anyhow!("obj file ({}) with empty texture reference", obj_file_name)
-        })?);
-        let diffuse_texture_path_str = to_posix_path(&diffuse_texture_path);
-        let diffuse_texture_file_handle = get_value_from_map(file_map, &diffuse_texture_path_str)?;
-        let diffuse_texture = klgl::Texture::from_bytes(
-            &ctx.device,
-            &ctx.queue,
-            &diffuse_texture_file_handle.data,
-            &diffuse_texture_path_str,
-        )?;
-        let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
-                },
-            ],
-            label: None,
-        });
-
-        materials.push(Material {
-            name: m.name,
-            diffuse_texture,
-            bind_group,
-        })
-    }
-
-    let meshes = models
-        .into_iter()
-        .map(|m| {
-            let vertices = (0..m.mesh.positions.len() / 3)
-                .map(|i| {
-                    if m.mesh.normals.is_empty() {
-                        ModelVertex {
-                            position: [
-                                m.mesh.positions[i * 3],
-                                m.mesh.positions[i * 3 + 1],
-                                m.mesh.positions[i * 3 + 2],
-                            ],
-                            tex_coords: [
-                                m.mesh.texcoords[i * 2],
-                                1.0 - m.mesh.texcoords[i * 2 + 1],
-                            ],
-                            normal: [0.0, 0.0, 0.0],
-                        }
-                    } else {
-                        ModelVertex {
-                            position: [
-                                m.mesh.positions[i * 3],
-                                m.mesh.positions[i * 3 + 1],
-                                m.mesh.positions[i * 3 + 2],
-                            ],
-                            tex_coords: [
-                                m.mesh.texcoords[i * 2],
-                                1.0 - m.mesh.texcoords[i * 2 + 1],
-                            ],
-                            normal: [
-                                m.mesh.normals[i * 3],
-                                m.mesh.normals[i * 3 + 1],
-                                m.mesh.normals[i * 3 + 2],
-                            ],
-                        }
+        let (models, obj_materials) = tobj::load_obj_buf(
+            &mut obj_reader,
+            &tobj::LoadOptions {
+                triangulate: true,
+                single_index: true,
+                ..Default::default()
+            },
+            |p| {
+                let file_path = root_path.join(p);
+                let file_path_str = to_posix_path(&file_path);
+                match get_value_from_map(file_map, &file_path_str) {
+                    Ok(file_data) => {
+                        tobj::load_mtl_buf(&mut BufReader::new(Cursor::new(&file_data.data)))
                     }
-                })
-                .collect::<Vec<_>>();
+                    Err(err) => {
+                        log::error!(
+                            "Failed to find a file {} required for model {}. It was expected that is was already preloaded by this point. Error: {}",
+                            file_path_str,
+                            obj_file_name,
+                            err
+                        );
+                        Err(tobj::LoadError::OpenFileFailed)
+                    }
+                }
+            },
+        )?;
 
-            let vertex_buffer = ctx
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some(&format!("{:?} Vertex Buffer", obj_file_name)),
-                    contents: bytemuck::cast_slice(&vertices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-            let index_buffer = ctx
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some(&format!("{:?} Index Buffer", obj_file_name)),
-                    contents: bytemuck::cast_slice(&m.mesh.indices),
-                    usage: wgpu::BufferUsages::INDEX,
-                });
+        let mut materials = Vec::new();
+        for m in obj_materials? {
+            let diffuse_texture_path = root_path.join(&m.diffuse_texture.ok_or_else(|| {
+                anyhow::anyhow!("obj file ({}) with empty texture reference", obj_file_name)
+            })?);
+            let diffuse_texture_path_str = to_posix_path(&diffuse_texture_path);
+            let diffuse_texture_file_handle =
+                get_value_from_map(file_map, &diffuse_texture_path_str)?;
+            let diffuse_texture = klgl::Texture::from_bytes(
+                &ctx.device,
+                &ctx.queue,
+                &diffuse_texture_file_handle.data,
+                &diffuse_texture_path_str,
+            )?;
+            let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&diffuse_texture.view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler),
+                    },
+                ],
+                label: None,
+            });
 
-            Mesh {
-                name: obj_file_name.to_string(),
-                vertex_buffer,
-                index_buffer,
-                num_elements: m.mesh.indices.len() as u32,
-                material: m.mesh.material_id.unwrap_or(0),
-            }
-        })
-        .collect::<Vec<_>>();
+            materials.push(Material {
+                name: m.name,
+                diffuse_texture,
+                bind_group,
+            })
+        }
 
-    Ok(Model { meshes, materials })
+        let meshes = models
+            .into_iter()
+            .map(|m| {
+                let vertices = (0..m.mesh.positions.len() / 3)
+                    .map(|i| {
+                        if m.mesh.normals.is_empty() {
+                            ModelVertex {
+                                position: [
+                                    m.mesh.positions[i * 3],
+                                    m.mesh.positions[i * 3 + 1],
+                                    m.mesh.positions[i * 3 + 2],
+                                ],
+                                tex_coords: [
+                                    m.mesh.texcoords[i * 2],
+                                    1.0 - m.mesh.texcoords[i * 2 + 1],
+                                ],
+                                normal: [0.0, 0.0, 0.0],
+                            }
+                        } else {
+                            ModelVertex {
+                                position: [
+                                    m.mesh.positions[i * 3],
+                                    m.mesh.positions[i * 3 + 1],
+                                    m.mesh.positions[i * 3 + 2],
+                                ],
+                                tex_coords: [
+                                    m.mesh.texcoords[i * 2],
+                                    1.0 - m.mesh.texcoords[i * 2 + 1],
+                                ],
+                                normal: [
+                                    m.mesh.normals[i * 3],
+                                    m.mesh.normals[i * 3 + 1],
+                                    m.mesh.normals[i * 3 + 2],
+                                ],
+                            }
+                        }
+                    })
+                    .collect::<Vec<_>>();
+
+                let vertex_buffer =
+                    ctx.device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some(&format!("{:?} Vertex Buffer", obj_file_name)),
+                            contents: bytemuck::cast_slice(&vertices),
+                            usage: wgpu::BufferUsages::VERTEX,
+                        });
+                let index_buffer =
+                    ctx.device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some(&format!("{:?} Index Buffer", obj_file_name)),
+                            contents: bytemuck::cast_slice(&m.mesh.indices),
+                            usage: wgpu::BufferUsages::INDEX,
+                        });
+
+                Mesh {
+                    name: obj_file_name.to_string(),
+                    vertex_buffer,
+                    index_buffer,
+                    num_elements: m.mesh.indices.len() as u32,
+                    material: m.mesh.material_id.unwrap_or(0),
+                }
+            })
+            .collect::<Vec<_>>();
+
+        Ok(Model { meshes, materials })
+    }
 }

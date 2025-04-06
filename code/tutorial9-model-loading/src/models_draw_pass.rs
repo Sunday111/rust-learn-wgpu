@@ -1,10 +1,13 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use cgmath::Deg;
-use klgl::{Rotator, file_loader::FileDataHandle};
+use klgl::{
+    Rotator,
+    file_loader::{FileDataHandle, FileLoader, FileLoaderEndpoint},
+};
 use wgpu::util::DeviceExt;
 
-use crate::model::{ModelVertex, Vertex};
+use crate::model::{Model, ModelVertex, Vertex};
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -57,11 +60,11 @@ pub struct ModelsDrawPass {
     instances: Vec<Instance>,
     instances_buffer: wgpu::Buffer,
     loading_model: Option<LoadingModel>,
-    model: Option<crate::model::Model>,
+    model: Option<Model>,
 }
 
 struct LoadingModel {
-    endpoint: klgl::file_loader::FileLoaderEndpoint,
+    endpoint: FileLoaderEndpoint,
     received: HashMap<String, FileDataHandle>,
     remaining: u16,
     obj_path: String,
@@ -70,7 +73,7 @@ struct LoadingModel {
 
 impl LoadingModel {
     pub fn new(
-        file_loader: &mut klgl::file_loader::FileLoader,
+        file_loader: &mut FileLoader,
         obj_path: &str,
         bind_group_layout: wgpu::BindGroupLayout,
         requirements: &[&str],
@@ -105,12 +108,12 @@ impl LoadingModel {
         }
     }
 
-    pub fn get(&self, ctx: &klgl::RenderContext) -> Option<anyhow::Result<crate::model::Model>> {
+    pub fn get(&self, ctx: &klgl::RenderContext) -> Option<anyhow::Result<Model>> {
         if !self.ready() {
             return None;
         }
 
-        Some(crate::model::load_model(
+        Some(Model::load(
             &self.obj_path,
             &self.received,
             ctx,
@@ -121,7 +124,7 @@ impl LoadingModel {
 
 impl ModelsDrawPass {
     pub async fn new(
-        file_loader: &mut klgl::file_loader::FileLoader,
+        file_loader: &mut FileLoader,
         render_context: Rc<RefCell<klgl::RenderContext>>,
         camera_bind_group_layout: &wgpu::BindGroupLayout,
         depth_stencil_state: Option<wgpu::DepthStencilState>,

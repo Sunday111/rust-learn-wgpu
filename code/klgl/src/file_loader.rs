@@ -1,4 +1,3 @@
-use async_std::path::PathBuf;
 use cfg_if::cfg_if;
 use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc};
 
