@@ -318,11 +318,20 @@ impl ModelsDrawPass {
                     usage: wgpu::BufferUsages::VERTEX,
                 });
 
-        let model_path = "models/cube/cube.obj";
+        // let model_path = "models/cube/cube.obj";
+        // let model_requirements = [
+        //     "models/cube/cube.mtl",
+        //     "models/cube/cube-diffuse.jpg",
+        //     "models/cube/cube-normal.png",
+        // ];
+
+        let model_path = "models/wooden_crate/wooden_crate.obj";
         let model_requirements = [
-            "models/cube/cube.mtl",
-            "models/cube/cube-diffuse.jpg",
-            "models/cube/cube-normal.png",
+            "models/wooden_crate/wooden_crate.mtl",
+            "models/wooden_crate/wooden_crate_base_color.png",
+            "models/wooden_crate/wooden_crate_metallic.png",
+            "models/wooden_crate/wooden_crate_normal.png",
+            "models/wooden_crate/wooden_crate_roughness.png",
         ];
 
         let loading_model = Some(LoadingModel::new(
@@ -394,13 +403,16 @@ impl ModelsDrawPass {
                     roll: Deg(0.0),
                 };
 
+                let scale = cgmath::Matrix4::from_scale(0.1);
+
                 Instance {
                     model: (cgmath::Matrix4::from_translation(cgmath::Vector3 {
-                        x: x as f32,
-                        y: y as f32,
+                        x: (x as f32),
+                        y: (y as f32),
                         z: 1.0,
-                    }) * rotation.to_matrix())
-                    .into(),
+                    }) * rotation.to_matrix()
+                        * scale)
+                        .into(),
                 }
             })
         }));
@@ -503,7 +515,7 @@ impl ModelsDrawPass {
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             }),
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                topology: wgpu::PrimitiveTopology::TriangleList,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
                 cull_mode: Some(wgpu::Face::Back),
@@ -563,13 +575,26 @@ impl ModelsDrawPass {
     }
 
     pub fn render(&self, render_pass: &mut wgpu::RenderPass, camera_bind_group: &wgpu::BindGroup) {
-        let texture = &self.textures[self.active_texture as usize];
-        render_pass.set_pipeline(&self.pipeline);
-        render_pass.set_bind_group(0, &texture.bind_group, &[]);
-        render_pass.set_bind_group(1, camera_bind_group, &[]);
-        render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        render_pass.set_vertex_buffer(1, self.instances_buffer.slice(..));
-        render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-        render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as _);
+        // let texture = &self.textures[self.active_texture as usize];
+        // render_pass.set_pipeline(&self.pipeline);
+        // render_pass.set_bind_group(0, &texture.bind_group, &[]);
+        // render_pass.set_bind_group(1, camera_bind_group, &[]);
+        // render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+        // render_pass.set_vertex_buffer(1, self.instances_buffer.slice(..));
+        // render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+        // render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as _);
+
+        if let Some(model) = &self.model {
+            for mesh in &model.meshes {
+                render_pass.set_pipeline(&self.pipeline);
+                render_pass.set_vertex_buffer(1, self.instances_buffer.slice(..));
+                mesh.draw_instanced(
+                    render_pass,
+                    camera_bind_group,
+                    &model.materials[mesh.material],
+                    0..self.instances.len() as u32,
+                );
+            }
+        }
     }
 }

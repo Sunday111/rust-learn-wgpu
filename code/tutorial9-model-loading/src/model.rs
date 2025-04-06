@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     io::{BufReader, Cursor},
+    ops::Range,
     path::{Path, PathBuf},
     rc::Rc,
     sync::Arc,
@@ -51,6 +52,31 @@ impl Vertex for ModelVertex {
 pub struct Model {
     pub meshes: Vec<Mesh>,
     pub materials: Vec<Material>,
+}
+
+impl Mesh {
+    pub fn draw(
+        &self,
+        render_pass: &mut wgpu::RenderPass,
+        camera_bind_group: &wgpu::BindGroup,
+        material: &Material,
+    ) {
+        self.draw_instanced(render_pass, camera_bind_group, material, 0..1);
+    }
+
+    pub fn draw_instanced(
+        &self,
+        render_pass: &mut wgpu::RenderPass,
+        camera_bind_group: &wgpu::BindGroup,
+        material: &Material,
+        instances: Range<u32>,
+    ) {
+        render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+        render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        render_pass.set_bind_group(0, &material.bind_group, &[]);
+        render_pass.set_bind_group(1, camera_bind_group, &[]);
+        render_pass.draw_indexed(0..self.num_elements, 0, instances);
+    }
 }
 
 pub struct Material {
