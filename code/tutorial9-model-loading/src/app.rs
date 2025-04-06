@@ -325,11 +325,6 @@ impl Renderer {
         }
 
         let dur_since_start = now.duration_since(self.start_time);
-        self.models_draw_pass.set_active_texture(
-            ((dur_since_start.as_secs_f64() / 3.0) as u32)
-                % self.models_draw_pass.num_textures() as u32,
-        );
-
         self.camera_controller.update_camera(&mut self.camera);
         self.camera_uniform.update_view_proj(&self.camera);
         self.render_context.borrow().queue.write_buffer(

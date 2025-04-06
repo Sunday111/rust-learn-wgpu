@@ -1,83 +1,10 @@
-use std::{
-    cell::RefCell,
-    collections::{HashMap, HashSet},
-    rc::Rc,
-};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use async_std::path::PathBuf;
-use cgmath::{Deg, Transform};
-use klgl::{
-    Rotator,
-    file_loader::{self, FileDataHandle, FileId, FileLoader},
-};
-use log::info;
-use tutorial_embedded_content::ILLUMINATI_PNG;
+use cgmath::Deg;
+use klgl::{Rotator, file_loader::FileDataHandle};
 use wgpu::util::DeviceExt;
 
-use crate::model::{self, ModelVertex, Vertex};
-
-fn transform_model(vertices: &mut [ModelVertex]) {
-    let rm = Rotator {
-        yaw: Deg(0.0),
-        pitch: Deg(0.0),
-        roll: Deg(0.0),
-    }
-    .to_matrix();
-
-    for v in vertices {
-        v.position = rm.transform_point(v.position.into()).into();
-    }
-}
-
-const TRIANGLE_VERTICES: [ModelVertex; 3] = [
-    ModelVertex {
-        position: [0.0, 0.5, 0.0],
-        tex_coords: [0.5, 0.0],
-        normal: [1.0, 0.0, 0.0],
-    },
-    ModelVertex {
-        position: [-0.5, -0.5, 0.0],
-        tex_coords: [0.0, 1.0],
-        normal: [0.0, 1.0, 0.0],
-    },
-    ModelVertex {
-        position: [0.5, -0.5, 0.0],
-        tex_coords: [1.0, 1.0],
-        normal: [0.0, 0.0, 1.0],
-    },
-];
-
-const TRIANGLE_INDICES: &[u16] = &[0, 1, 2];
-
-const HEX_VERTICES: [ModelVertex; 5] = [
-    ModelVertex {
-        position: [-0.0868241, 0.49240386, 0.0],
-        tex_coords: [0.4131759, 0.99240386],
-        normal: [0.0, 0.0, 1.0],
-    }, // A
-    ModelVertex {
-        position: [-0.49513406, 0.06958647, 0.0],
-        tex_coords: [0.0048659444, 0.56958647],
-        normal: [0.0, 0.0, 1.0],
-    }, // B
-    ModelVertex {
-        position: [-0.21918549, -0.44939706, 0.0],
-        tex_coords: [0.28081453, 0.05060294],
-        normal: [0.0, 0.0, 1.0],
-    }, // C
-    ModelVertex {
-        position: [0.35966998, -0.3473291, 0.0],
-        tex_coords: [0.85967, 0.1526709],
-        normal: [0.0, 0.0, 1.0],
-    }, // D
-    ModelVertex {
-        position: [0.44147372, 0.2347359, 0.0],
-        tex_coords: [0.9414737, 0.7347359],
-        normal: [0.0, 0.0, 1.0],
-    }, // E
-];
-
-const HEX_INDICES: &[u16] = &[0, 1, 4, 1, 2, 4, 2, 3, 4];
+use crate::model::{ModelVertex, Vertex};
 
 #[repr(C)]
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -124,27 +51,11 @@ impl Instance {
     }
 }
 
-const PLACEHOLDER_TEXTURE: &[u8] = ILLUMINATI_PNG;
-
-pub struct TextureData {
-    path: String,
-    #[allow(dead_code)]
-    texture: klgl::Texture,
-    bind_group: wgpu::BindGroup,
-}
-
 pub struct ModelsDrawPass {
     ctx: Rc<RefCell<klgl::RenderContext>>,
     pipeline: wgpu::RenderPipeline,
-    vertex_buffer: wgpu::Buffer,
-    index_buffer: wgpu::Buffer,
     instances: Vec<Instance>,
     instances_buffer: wgpu::Buffer,
-    num_indices: u32,
-    texture_bind_group_layout: wgpu::BindGroupLayout,
-    textures: Vec<TextureData>,
-    active_texture: u32,
-    file_loader_endpoint: klgl::file_loader::FileLoaderEndpoint,
     loading_model: Option<LoadingModel>,
     model: Option<crate::model::Model>,
 }
@@ -215,8 +126,6 @@ impl ModelsDrawPass {
         camera_bind_group_layout: &wgpu::BindGroupLayout,
         depth_stencil_state: Option<wgpu::DepthStencilState>,
     ) -> Self {
-        let mut file_loader_endpoint = file_loader.make_endpoint();
-
         let texture_bind_group_layout = {
             let ctx = render_context.borrow();
             ctx.device
@@ -245,42 +154,6 @@ impl ModelsDrawPass {
                 })
         };
 
-        // let textures_paths: Vec<String> = (1..=99).map(|i| format!("{:06}.jpg", i)).collect();
-        let textures_paths: Vec<String> = vec!["happy-tree.png".into(), "illuminati.png".into()];
-
-        // Create placeholder textures
-        let textures: Vec<TextureData> = {
-            let ctx = render_context.borrow();
-            textures_paths
-                .iter()
-                .map(|path| {
-                    Self::make_texture_data(
-                        &ctx.device,
-                        &ctx.queue,
-                        PLACEHOLDER_TEXTURE,
-                        path.into(),
-                        &texture_bind_group_layout,
-                    )
-                })
-                .collect()
-        };
-
-        // Request real textures
-        textures_paths
-            .iter()
-            .for_each(|x| file_loader_endpoint.request(x));
-
-        let num_indices = TRIANGLE_INDICES.len();
-        let model_index_buffer =
-            render_context
-                .borrow()
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Index Buffer"),
-                    contents: bytemuck::cast_slice(TRIANGLE_INDICES),
-                    usage: wgpu::BufferUsages::INDEX,
-                });
-
         let models_pipeline = {
             let ctx = render_context.borrow();
             ModelsDrawPass::create_render_pipeline(
@@ -303,19 +176,6 @@ impl ModelsDrawPass {
                     label: Some("Instance Buffer"),
                     contents: bytemuck::cast_slice(&model_instances),
                     usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                });
-
-        let mut tri_vert: [ModelVertex; 3] = TRIANGLE_VERTICES.into();
-        transform_model(&mut tri_vert);
-
-        let model_vertex_buffer =
-            render_context
-                .borrow()
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("ModelVertex Buffer"),
-                    contents: bytemuck::cast_slice(&tri_vert),
-                    usage: wgpu::BufferUsages::VERTEX,
                 });
 
         // let model_path = "models/cube/cube.obj";
@@ -344,51 +204,10 @@ impl ModelsDrawPass {
         Self {
             ctx: render_context,
             pipeline: models_pipeline,
-            vertex_buffer: model_vertex_buffer,
-            index_buffer: model_index_buffer,
             instances: model_instances,
             instances_buffer: model_instances_buffer,
-            num_indices: num_indices as u32,
-            texture_bind_group_layout,
-            textures,
-            active_texture: 0,
-            file_loader_endpoint,
             loading_model,
             model: None,
-        }
-    }
-
-    pub fn num_textures(&self) -> u32 {
-        return self.textures.len() as u32;
-    }
-
-    fn make_texture_data(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        data: &[u8],
-        path: String,
-        bind_group_layout: &wgpu::BindGroupLayout,
-    ) -> TextureData {
-        let texture = klgl::Texture::from_bytes(&device, &queue, data, &path).unwrap();
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&texture.sampler),
-                },
-            ],
-            label: Some(&path),
-        });
-
-        TextureData {
-            path: path,
-            texture: texture,
-            bind_group: bind_group,
         }
     }
 
@@ -419,33 +238,6 @@ impl ModelsDrawPass {
     }
 
     pub fn update(&mut self, angle: Deg<f32>) {
-        while let Ok(file_data) = self.file_loader_endpoint.receiver.try_recv() {
-            let texture_path = self
-                .file_loader_endpoint
-                .loader
-                .path_by_id(file_data.id)
-                .unwrap();
-
-            match self.textures.iter().position(|x| x.path == texture_path) {
-                Some(index) => {
-                    let ctx = self.ctx.borrow();
-                    self.textures[index] = Self::make_texture_data(
-                        &ctx.device,
-                        &ctx.queue,
-                        &file_data.data,
-                        texture_path,
-                        &self.texture_bind_group_layout,
-                    );
-                }
-                None => {
-                    log::error!(
-                        "Receiver got texture data for \"{}\", but couldn't find it in textures list",
-                        texture_path
-                    );
-                }
-            }
-        }
-
         if let Some(loading_model) = &mut self.loading_model {
             loading_model.update();
             self.model = match loading_model.get(&self.ctx.borrow_mut()) {
@@ -537,42 +329,7 @@ impl ModelsDrawPass {
         })
     }
 
-    pub fn swap_model(&mut self) {
-        let (vertices, indices) = {
-            if self.num_indices == TRIANGLE_INDICES.len() as u32 {
-                let mut hex_vert: [ModelVertex; 5] = HEX_VERTICES.into();
-                transform_model(&mut hex_vert);
-                (hex_vert.to_vec(), HEX_INDICES)
-            } else {
-                let mut tri_vert: [ModelVertex; 3] = TRIANGLE_VERTICES.into();
-                transform_model(&mut tri_vert);
-                (tri_vert.to_vec(), TRIANGLE_INDICES)
-            }
-        };
-
-        let ctx = self.ctx.borrow();
-        self.vertex_buffer = ctx
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("ModelVertex Buffer"),
-                contents: bytemuck::cast_slice(&vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-
-        self.index_buffer = ctx
-            .device
-            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Index Buffer"),
-                contents: bytemuck::cast_slice(indices),
-                usage: wgpu::BufferUsages::INDEX,
-            });
-
-        self.num_indices = indices.len() as u32;
-    }
-
-    pub fn set_active_texture(&mut self, index: u32) {
-        self.active_texture = index.min((self.textures.len() - 1) as u32);
-    }
+    pub fn swap_model(&mut self) {}
 
     pub fn render(&self, render_pass: &mut wgpu::RenderPass, camera_bind_group: &wgpu::BindGroup) {
         if let Some(model) = &self.model {
