@@ -14,29 +14,32 @@ wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 
 
-[dependencies.tutorial2-surface]
-path = "../tutorial2-surface"
+[dependencies.tutorial02-surface]
+path = "../tutorial02-surface"
 
-[dependencies.tutorial3-pipeline]
-path = "../tutorial3-pipeline"
+[dependencies.tutorial03-pipeline]
+path = "../tutorial03-pipeline"
 
-[dependencies.tutorial4-buffers-and-indices]
-path = "../tutorial4-buffers-and-indices"
+[dependencies.tutorial04-buffers-and-indices]
+path = "../tutorial04-buffers-and-indices"
 
-[dependencies.tutorial5-textures]
-path = "../tutorial5-textures"
+[dependencies.tutorial05-textures]
+path = "../tutorial05-textures"
 
-[dependencies.tutorial6-uniforms]
-path = "../tutorial6-uniforms"
+[dependencies.tutorial06-uniforms]
+path = "../tutorial06-uniforms"
 
-[dependencies.tutorial7-instancing]
-path = "../tutorial7-instancing"
+[dependencies.tutorial07-instancing]
+path = "../tutorial07-instancing"
 
-[dependencies.tutorial8-depth]
-path = "../tutorial8-depth"
+[dependencies.tutorial08-depth]
+path = "../tutorial08-depth"
 
-[dependencies.tutorial9-model-loading]
-path = "../tutorial9-model-loading"
+[dependencies.tutorial09-model-loading]
+path = "../tutorial09-model-loading"
+
+[dependencies.tutorial10-lights]
+path = "../tutorial10-lights"
 
 [dependencies.image]
 version = "0.25"

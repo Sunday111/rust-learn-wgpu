@@ -9,11 +9,12 @@ macro_rules! wasm_bindgen_async_fn {
     };
 }
 
-wasm_bindgen_async_fn!(run_tutorial_2, tutorial2_surface);
-wasm_bindgen_async_fn!(run_tutorial_3, tutorial3_pipeline);
-wasm_bindgen_async_fn!(run_tutorial_4, tutorial4_buffers_and_indices);
-wasm_bindgen_async_fn!(run_tutorial_5, tutorial5_textures);
-wasm_bindgen_async_fn!(run_tutorial_6, tutorial6_uniforms);
-wasm_bindgen_async_fn!(run_tutorial_7, tutorial7_instancing);
-wasm_bindgen_async_fn!(run_tutorial_8, tutorial8_depth);
-wasm_bindgen_async_fn!(run_tutorial_9, tutorial9_model_loading);
+wasm_bindgen_async_fn!(run_tutorial_02, tutorial02_surface);
+wasm_bindgen_async_fn!(run_tutorial_03, tutorial03_pipeline);
+wasm_bindgen_async_fn!(run_tutorial_04, tutorial04_buffers_and_indices);
+wasm_bindgen_async_fn!(run_tutorial_05, tutorial05_textures);
+wasm_bindgen_async_fn!(run_tutorial_06, tutorial06_uniforms);
+wasm_bindgen_async_fn!(run_tutorial_07, tutorial07_instancing);
+wasm_bindgen_async_fn!(run_tutorial_08, tutorial08_depth);
+wasm_bindgen_async_fn!(run_tutorial_09, tutorial09_model_loading);
+wasm_bindgen_async_fn!(run_tutorial_10, tutorial10_lights);
