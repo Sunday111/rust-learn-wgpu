@@ -65,7 +65,7 @@ pub struct ModelsDrawPass {
 
 struct LoadingModel {
     endpoint: FileLoaderEndpoint,
-    received: HashMap<String, FileDataHandle>,
+    received_files: HashMap<String, FileDataHandle>,
     remaining: u16,
     obj_path: String,
     bind_group_layout: wgpu::BindGroupLayout,
@@ -89,7 +89,7 @@ impl LoadingModel {
             endpoint,
             obj_path: obj_path.into(),
             remaining,
-            received: HashMap::new(),
+            received_files: HashMap::new(),
             bind_group_layout,
         }
     }
@@ -101,7 +101,7 @@ impl LoadingModel {
     pub fn update(&mut self) {
         while let Ok(file_handle) = self.endpoint.receiver.try_recv() {
             let path = self.endpoint.loader.path_by_id(file_handle.id).unwrap();
-            self.received.insert(path, file_handle);
+            self.received_files.insert(path, file_handle);
             if self.remaining > 0 {
                 self.remaining -= 1;
             }
@@ -115,7 +115,7 @@ impl LoadingModel {
 
         Some(Model::load(
             &self.obj_path,
-            &self.received,
+            &self.received_files,
             ctx,
             &self.bind_group_layout,
         ))
@@ -188,13 +188,78 @@ impl ModelsDrawPass {
         //     "models/cube/cube-normal.png",
         // ];
 
-        let model_path = "models/wooden_crate/wooden_crate.obj";
+        // let model_path = "models/wooden_crate/wooden_crate.obj";
+        // let model_requirements = [
+        //     "models/wooden_crate/wooden_crate.mtl",
+        //     "models/wooden_crate/wooden_crate_base_color.png",
+        //     "models/wooden_crate/wooden_crate_metallic.png",
+        //     "models/wooden_crate/wooden_crate_normal.png",
+        //     "models/wooden_crate/wooden_crate_roughness.png",
+        // ];
+
+        // let model_path = "models/date_palm/date_palm.obj";
+        // let model_requirements = [
+        //     "models/date_palm/date_palm.mtl",
+        //     "models/date_palm/date_palm_texture.bmp",
+        // ];
+
+        let model_path = "models/sponza/sponza.obj";
         let model_requirements = [
-            "models/wooden_crate/wooden_crate.mtl",
-            "models/wooden_crate/wooden_crate_base_color.png",
-            "models/wooden_crate/wooden_crate_metallic.png",
-            "models/wooden_crate/wooden_crate_normal.png",
-            "models/wooden_crate/wooden_crate_roughness.png",
+            "models/sponza/sponza.mtl",
+            "models/sponza/background.png",
+            "models/sponza/background_bump.png",
+            "models/sponza/chain_texture.png",
+            "models/sponza/chain_texture_bump.png",
+            "models/sponza/chain_texture_mask.png",
+            "models/sponza/floor_gloss.png",
+            "models/sponza/lion.png",
+            "models/sponza/lion2_bump.png",
+            "models/sponza/lion_bump.png",
+            "models/sponza/spnza_bricks_a_bump.png",
+            "models/sponza/spnza_bricks_a_diff.png",
+            "models/sponza/spnza_bricks_a_spec.png",
+            "models/sponza/sponza_arch_bump.png",
+            "models/sponza/sponza_arch_diff.png",
+            "models/sponza/sponza_arch_spec.png",
+            "models/sponza/sponza_ceiling_a_diff.png",
+            "models/sponza/sponza_ceiling_a_spec.png",
+            "models/sponza/sponza_column_a_bump.png",
+            "models/sponza/sponza_column_a_diff.png",
+            "models/sponza/sponza_column_a_spec.png",
+            "models/sponza/sponza_column_b_bump.png",
+            "models/sponza/sponza_column_b_diff.png",
+            "models/sponza/sponza_column_b_spec.png",
+            "models/sponza/sponza_column_c_bump.png",
+            "models/sponza/sponza_column_c_diff.png",
+            "models/sponza/sponza_column_c_spec.png",
+            "models/sponza/sponza_curtain_blue_diff.png",
+            "models/sponza/sponza_curtain_diff.png",
+            "models/sponza/sponza_curtain_green_diff.png",
+            "models/sponza/sponza_details_diff.png",
+            "models/sponza/sponza_details_spec.png",
+            "models/sponza/sponza_fabric_blue_diff.png",
+            "models/sponza/sponza_fabric_diff.png",
+            "models/sponza/sponza_fabric_green_diff.png",
+            "models/sponza/sponza_fabric_purple.png",
+            "models/sponza/sponza_fabric_spec.png",
+            "models/sponza/sponza_flagpole_diff.png",
+            "models/sponza/sponza_flagpole_spec.png",
+            "models/sponza/sponza_floor_a_diff.png",
+            "models/sponza/sponza_floor_a_spec.png",
+            "models/sponza/sponza_roof_diff.png",
+            "models/sponza/sponza_thorn_bump.png",
+            "models/sponza/sponza_thorn_diff.png",
+            "models/sponza/sponza_thorn_mask.png",
+            "models/sponza/sponza_thorn_spec.png",
+            "models/sponza/vase_bump.png",
+            "models/sponza/vase_dif.png",
+            "models/sponza/vase_hanging.png",
+            "models/sponza/vase_plant.png",
+            "models/sponza/vase_plant_mask.png",
+            "models/sponza/vase_plant_spec.png",
+            "models/sponza/vase_round.png",
+            "models/sponza/vase_round_bump.png",
+            "models/sponza/vase_round_spec.png",
         ];
 
         let loading_model = Some(LoadingModel::new(
@@ -215,14 +280,14 @@ impl ModelsDrawPass {
     }
 
     fn compute_model_instances(v: &mut Vec<Instance>, angle: Deg<f32>) {
-        const NUM_INSTANCES_PER_ROW: u32 = 10;
+        const NUM_INSTANCES_PER_ROW: u32 = 1;
         v.clear();
         v.extend((0..NUM_INSTANCES_PER_ROW).flat_map(|y| {
             (0..NUM_INSTANCES_PER_ROW).map(move |x| {
                 let rotation = Rotator {
                     yaw: angle * (-0.5 + ((x + 1) as f32 / NUM_INSTANCES_PER_ROW as f32)),
                     pitch: angle * (-0.5 + ((y + 1) as f32 / NUM_INSTANCES_PER_ROW as f32)),
-                    roll: Deg(0.0),
+                    roll: Deg(90.0),
                 };
 
                 let scale = cgmath::Matrix4::from_scale(0.1);
@@ -264,7 +329,8 @@ impl ModelsDrawPass {
             }
         }
 
-        Self::compute_model_instances(&mut self.instances, angle);
+        Self::compute_model_instances(&mut self.instances, Deg(0.0));
+        // Self::compute_model_instances(&mut self.instances, angle);
         self.ctx.borrow().queue.write_buffer(
             &self.instances_buffer,
             0,

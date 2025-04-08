@@ -6,6 +6,7 @@ use std::{
 };
 
 use klgl::file_loader::FileDataHandle;
+use tutorial_embedded_content::ILLUMINATI_PNG;
 use wgpu::util::DeviceExt;
 
 fn get_value_from_map<'map, Key, Value, Hasher, Query>(
@@ -135,8 +136,12 @@ impl Model {
         let obj_cursor = Cursor::new(&obj_file_handle.data);
         let mut obj_reader = BufReader::new(obj_cursor);
 
-        let path_buf = PathBuf::from(String::from(obj_file_name));
-        let root_path = path_buf.parent().unwrap();
+        let root_path = PathBuf::from({
+            match obj_file_name.rfind('/') {
+                Some(i) => String::from(&obj_file_name[0..i + 1]),
+                None => String::new(),
+            }
+        });
 
         let (models, obj_materials) = tobj::load_obj_buf(
             &mut obj_reader,
@@ -167,18 +172,35 @@ impl Model {
 
         let mut materials = Vec::new();
         for m in obj_materials? {
-            let diffuse_texture_path = root_path.join(&m.diffuse_texture.ok_or_else(|| {
-                anyhow::anyhow!("obj file ({}) with empty texture reference", obj_file_name)
-            })?);
-            let diffuse_texture_path_str = to_posix_path(&diffuse_texture_path);
-            let diffuse_texture_file_handle =
-                get_value_from_map(file_map, &diffuse_texture_path_str)?;
-            let diffuse_texture = klgl::Texture::from_bytes(
-                &ctx.device,
-                &ctx.queue,
-                &diffuse_texture_file_handle.data,
-                &diffuse_texture_path_str,
-            )?;
+            let diffuse_texture = {
+                match &m.diffuse_texture {
+                    Some(diffuse_texture_path) => {
+                        let diffuse_texture_path = root_path.join(&diffuse_texture_path);
+                        let diffuse_texture_path_str = to_posix_path(&diffuse_texture_path);
+                        let diffuse_texture_file_handle =
+                            get_value_from_map(file_map, &diffuse_texture_path_str)?;
+                        klgl::Texture::from_bytes(
+                            &ctx.device,
+                            &ctx.queue,
+                            &diffuse_texture_file_handle.data,
+                            &diffuse_texture_path_str,
+                        )?
+                    }
+                    None => {
+                        log::warn!(
+                            "obj file {} has a material {} without diffuse texture. Using placeholder",
+                            obj_file_name,
+                            m.name
+                        );
+                        klgl::Texture::from_bytes(
+                            &ctx.device,
+                            &ctx.queue,
+                            &ILLUMINATI_PNG,
+                            &"PLACEHOLDER",
+                        )?
+                    }
+                }
+            };
             let bind_group = ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 layout,
                 entries: &[

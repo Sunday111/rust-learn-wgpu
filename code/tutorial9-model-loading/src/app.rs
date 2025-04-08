@@ -106,17 +106,17 @@ impl Renderer {
         let camera = Camera::new(
             // position the camera 1 unit up and 2 units back
             // +z is out of the screen
-            (5.41923, 0.19568399, 6.468395).into(),
+            (19.03984, -5.1585493, 23.231775).into(),
             // have it look at the origin
             Rotator {
-                yaw: Deg(81.0),
-                pitch: Deg(56.0),
+                yaw: Deg(159.0),
+                pitch: Deg(-13.0),
                 roll: Deg(0.0),
             },
             render_context.borrow().aspect(),
             90.0,
             0.1,
-            100.0,
+            1000.0,
         );
 
         let mut camera_uniform = CameraUniform::new();
