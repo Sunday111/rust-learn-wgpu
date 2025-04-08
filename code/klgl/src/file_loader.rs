@@ -115,6 +115,22 @@ impl FileLoader {
         }
     }
 
+    pub fn data_by_path(&self, path: &str) -> Option<FileDataHandle> {
+        self.inner
+            .borrow()
+            .file_id_map
+            .get_by_left(path)
+            .and_then(|id| self.data_by_id(id))
+    }
+
+    pub fn data_by_id(&self, id: &FileId) -> Option<FileDataHandle> {
+        self.inner
+            .borrow()
+            .ready_files
+            .get(id)
+            .and_then(|x| Some(x.clone()))
+    }
+
     pub fn new() -> Self {
         let (sender, receiver) = async_channel::unbounded::<(String, Vec<u8>)>();
         Self {
@@ -129,45 +145,6 @@ impl FileLoader {
                 pending_files: HashMap::new(),
             })),
         }
-    }
-
-    pub fn try_get_file(&self, path: &str) -> Option<FileDataHandle> {
-        self.inner
-            .borrow()
-            .file_id_map
-            .get_by_left(path)
-            .and_then(|id| self.try_get_by_id(id))
-    }
-
-    pub fn try_get_by_id(&self, id: &FileId) -> Option<FileDataHandle> {
-        self.inner
-            .borrow()
-            .ready_files
-            .get(id)
-            .and_then(|x| Some(x.clone()))
-    }
-
-    pub async fn get_file_async(&mut self, path: &str) -> anyhow::Result<FileDataHandle> {
-        let id = self.inner.borrow_mut().find_or_add_file_id(path);
-        if let Some(file_data) = self.inner.borrow_mut().ready_files.get(&id) {
-            return Ok(file_data.clone());
-        }
-
-        if let Some(_) = self.inner.borrow().pending_files.get(&id) {
-            return Err(anyhow::anyhow!(
-                "Could not request file asynchronously because it is already in pending list. These two ways are mutually exclusive"
-            ));
-        }
-
-        let data = load_binary(&path).await?;
-
-        // Add to ready files
-        self.inner
-            .borrow_mut()
-            .ready_files
-            .insert(id, FileDataHandle::new(FileData { id, data }));
-
-        Ok(self.inner.borrow().ready_files.get(&id).unwrap().clone())
     }
 
     pub fn get_or_request<Callback>(&mut self, path: &str, callback: Callback) -> FileId
@@ -317,23 +294,5 @@ impl FileLoaderEndpoint {
                 }
             }
         });
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    // Note this useful idiom: importing names from outer (for mod tests) scope.
-    use super::*;
-
-    #[test]
-    fn test_add() {
-        let mut loader = FileLoader::new();
-        loader.get_or_request("why hello", |x| {
-            println!("ready: {:?}", x);
-        });
-        loader.poll();
-
-        let expected: String = "why hello".into();
-        assert_eq!(loader.path_by_id(FileId(0)), Some(expected));
     }
 }
