@@ -93,15 +93,23 @@ impl Mesh {
         &self,
         render_pass: &mut wgpu::RenderPass,
         camera_bind_group: &wgpu::BindGroup,
+        light_bind_group: &wgpu::BindGroup,
         material: &Material,
     ) {
-        self.draw_instanced(render_pass, camera_bind_group, material, 0..1);
+        self.draw_instanced(
+            render_pass,
+            camera_bind_group,
+            light_bind_group,
+            material,
+            0..1,
+        );
     }
 
     pub fn draw_instanced(
         &self,
         render_pass: &mut wgpu::RenderPass,
         camera_bind_group: &wgpu::BindGroup,
+        light_bind_group: &wgpu::BindGroup,
         material: &Material,
         instances: Range<u32>,
     ) {
@@ -109,6 +117,7 @@ impl Mesh {
         render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         render_pass.set_bind_group(0, &material.bind_group, &[]);
         render_pass.set_bind_group(1, camera_bind_group, &[]);
+        render_pass.set_bind_group(2, light_bind_group, &[]);
         render_pass.draw_indexed(0..self.num_elements, 0, instances);
     }
 }
@@ -118,11 +127,18 @@ impl Model {
         &self,
         render_pass: &mut wgpu::RenderPass,
         camera_bind_group: &wgpu::BindGroup,
+        light_bind_group: &wgpu::BindGroup,
         instances: Range<u32>,
     ) {
         for mesh in &self.meshes {
             let material = &self.materials[mesh.material];
-            mesh.draw_instanced(render_pass, camera_bind_group, material, instances.clone());
+            mesh.draw_instanced(
+                render_pass,
+                camera_bind_group,
+                light_bind_group,
+                material,
+                instances.clone(),
+            );
         }
     }
 

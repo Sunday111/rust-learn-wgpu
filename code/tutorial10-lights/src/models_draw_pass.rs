@@ -13,6 +13,7 @@ use crate::model::{Model, ModelVertex, Vertex};
 #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct Instance {
     model: [[f32; 4]; 4],
+    normal: [[f32; 3]; 3],
 }
 
 impl Instance {
@@ -20,20 +21,20 @@ impl Instance {
         use std::mem;
         wgpu::VertexBufferLayout {
             array_stride: mem::size_of::<Instance>() as wgpu::BufferAddress,
-            // We need to switch from using a step mode of ModelVertex to Instance
+            // We need to switch from using a step mode of Vertex to Instance
             // This means that our shaders will only change to use the next
             // instance when the shader starts processing a new instance
             step_mode: wgpu::VertexStepMode::Instance,
             attributes: &[
-                // A mat4 takes up 4 vertex slots as it is technically 4 vec4s. We need to define a slot
-                // for each vec4. We'll have to reassemble the mat4 in the shader.
                 wgpu::VertexAttribute {
                     offset: 0,
                     // While our vertex shader only uses locations 0, and 1 now, in later tutorials, we'll
-                    // be using 2, 3, and 4, for ModelVertex. We'll start at slot 5, not conflict with them later
+                    // be using 2, 3, and 4 for Vertex. We'll start at slot 5 to not conflict with them later
                     shader_location: 5,
                     format: wgpu::VertexFormat::Float32x4,
                 },
+                // A mat4 takes up 4 vertex slots as it is technically 4 vec4s. We need to define a slot
+                // for each vec4. We don't have to do this in code, though.
                 wgpu::VertexAttribute {
                     offset: mem::size_of::<[f32; 4]>() as wgpu::BufferAddress,
                     shader_location: 6,
@@ -49,6 +50,21 @@ impl Instance {
                     shader_location: 8,
                     format: wgpu::VertexFormat::Float32x4,
                 },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 16]>() as wgpu::BufferAddress,
+                    shader_location: 9,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 19]>() as wgpu::BufferAddress,
+                    shader_location: 10,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
+                wgpu::VertexAttribute {
+                    offset: mem::size_of::<[f32; 22]>() as wgpu::BufferAddress,
+                    shader_location: 11,
+                    format: wgpu::VertexFormat::Float32x3,
+                },
             ],
         }
     }
@@ -57,10 +73,42 @@ impl Instance {
 pub struct ModelsDrawPass {
     ctx: Rc<RefCell<klgl::RenderContext>>,
     pipeline: wgpu::RenderPipeline,
+
     instances: Vec<Instance>,
     instances_buffer: wgpu::Buffer,
+
+    light_uniform: LightUniform,
+    light_buffer: wgpu::Buffer,
+    light_bind_group: wgpu::BindGroup,
+
     loading_model: Option<LoadingModel>,
     model: Option<Model>,
+}
+
+// lib.rs
+#[repr(C)]
+#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+struct LightUniform {
+    position: [f32; 3],
+
+    // Due to uniforms requiring 16 byte (4 float) spacing, we need to use a padding field here
+    _padding0: u32,
+
+    color: [f32; 3],
+
+    // Due to uniforms requiring 16 byte (4 float) spacing, we need to use a padding field here
+    _padding1: u32,
+}
+
+impl Default for LightUniform {
+    fn default() -> Self {
+        Self {
+            position: [0.0; 3],
+            _padding0: 0,
+            color: [1.0; 3],
+            _padding1: 0,
+        }
+    }
 }
 
 struct LoadingModel {
@@ -123,6 +171,61 @@ impl LoadingModel {
 }
 
 impl ModelsDrawPass {
+    fn init_light(
+        render_context: &klgl::RenderContext,
+    ) -> (
+        LightUniform,
+        wgpu::Buffer,
+        wgpu::BindGroupLayout,
+        wgpu::BindGroup,
+    ) {
+        let light_uniform = LightUniform {
+            position: [2.0, 2.0, 2.0],
+            color: [1.0, 1.0, 1.0],
+            ..Default::default()
+        };
+
+        // We'll want to update our lights position, so we use COPY_DST
+        let uniform_buffer =
+            render_context
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Light VB"),
+                    contents: bytemuck::cast_slice(&[light_uniform]),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+
+        let bind_group_layout =
+            render_context
+                .device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    entries: &[wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    }],
+                    label: None,
+                });
+
+        let bind_group = render_context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                layout: &bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                }],
+                label: None,
+            });
+
+        (light_uniform, uniform_buffer, bind_group_layout, bind_group)
+    }
+
     pub async fn new(
         file_loader: &mut FileLoader,
         render_context: Rc<RefCell<klgl::RenderContext>>,
@@ -157,12 +260,16 @@ impl ModelsDrawPass {
                 })
         };
 
+        let (light_uniform, light_buffer, light_bind_group_layout, light_bind_group) =
+            Self::init_light(&render_context.borrow());
+
         let models_pipeline = {
             let ctx = render_context.borrow();
             ModelsDrawPass::create_render_pipeline(
                 &ctx.device,
                 &camera_bind_group_layout,
                 &texture_bind_group_layout,
+                &light_bind_group_layout,
                 ctx.config.format,
                 depth_stencil_state,
             )
@@ -274,6 +381,9 @@ impl ModelsDrawPass {
             pipeline: models_pipeline,
             instances: model_instances,
             instances_buffer: model_instances_buffer,
+            light_uniform,
+            light_buffer,
+            light_bind_group,
             loading_model,
             model: None,
         }
@@ -284,11 +394,12 @@ impl ModelsDrawPass {
         v.clear();
         v.extend((0..NUM_INSTANCES_PER_ROW).flat_map(|y| {
             (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                let rotation = Rotator {
+                let r = Rotator {
                     yaw: angle * (-0.5 + ((x + 1) as f32 / NUM_INSTANCES_PER_ROW as f32)),
                     pitch: angle * (-0.5 + ((y + 1) as f32 / NUM_INSTANCES_PER_ROW as f32)),
                     roll: Deg(90.0),
-                };
+                }
+                .to_matrix();
 
                 let scale = cgmath::Matrix4::from_scale(0.1);
 
@@ -297,15 +408,20 @@ impl ModelsDrawPass {
                         x: (x as f32),
                         y: (y as f32),
                         z: 1.0,
-                    }) * rotation.to_matrix()
+                    }) * r
                         * scale)
                         .into(),
+                    normal: cgmath::Matrix3::new(
+                        r.x.x, r.x.y, r.x.z, r.y.x, r.y.y, r.y.z, r.z.x, r.z.y, r.z.z,
+                    )
+                    .into(),
                 }
             })
         }));
     }
 
     pub fn update(&mut self, angle: Deg<f32>) {
+        // Poll the model if it is still loading
         if let Some(loading_model) = &mut self.loading_model {
             loading_model.update();
             self.model = match loading_model.get(&self.ctx.borrow_mut()) {
@@ -329,6 +445,23 @@ impl ModelsDrawPass {
             }
         }
 
+        // Update light position
+        {
+            let old_position: cgmath::Vector3<_> = self.light_uniform.position.into();
+            self.light_uniform.position =
+                (<cgmath::Quaternion<f32> as cgmath::Rotation3>::from_axis_angle(
+                    (0.0, 1.0, 0.0).into(),
+                    cgmath::Deg(1.0),
+                ) * old_position)
+                    .into();
+            self.ctx.borrow().queue.write_buffer(
+                &self.light_buffer,
+                0,
+                bytemuck::cast_slice(&[self.light_uniform]),
+            );
+        }
+
+        // Update model instances buffer
         Self::compute_model_instances(&mut self.instances, Deg(0.0));
         // Self::compute_model_instances(&mut self.instances, angle);
         self.ctx.borrow().queue.write_buffer(
@@ -342,12 +475,13 @@ impl ModelsDrawPass {
         device: &wgpu::Device,
         camera_bind_group_layout: &wgpu::BindGroupLayout,
         texture_bind_group_layout: &wgpu::BindGroupLayout,
+        light_bind_group_layout: &wgpu::BindGroupLayout,
         surface_format: wgpu::TextureFormat,
         depth_stencil_state: Option<wgpu::DepthStencilState>,
     ) -> wgpu::RenderPipeline {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Model Shader"),
-            source: wgpu::ShaderSource::Wgsl(tutorial_embedded_content::TUTORIAL_9_SHADER.into()),
+            source: wgpu::ShaderSource::Wgsl(tutorial_embedded_content::TUTORIAL_10_SHADER.into()),
         });
 
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -355,7 +489,11 @@ impl ModelsDrawPass {
             layout: Some(
                 &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("Triangle Strip Render Pipeline Layout"),
-                    bind_group_layouts: &[&texture_bind_group_layout, &camera_bind_group_layout],
+                    bind_group_layouts: &[
+                        &texture_bind_group_layout,
+                        &camera_bind_group_layout,
+                        &light_bind_group_layout,
+                    ],
                     push_constant_ranges: &[],
                 }),
             ),
@@ -407,6 +545,7 @@ impl ModelsDrawPass {
             model.draw_instanced(
                 render_pass,
                 camera_bind_group,
+                &self.light_bind_group,
                 0..self.instances.len() as u32,
             );
         }
