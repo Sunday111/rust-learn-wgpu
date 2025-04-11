@@ -420,7 +420,7 @@ impl ModelsDrawPass {
         }));
     }
 
-    pub fn update(&mut self, angle: Deg<f32>) {
+    pub fn update(&mut self, _angle: Deg<f32>) {
         // Poll the model if it is still loading
         if let Some(loading_model) = &mut self.loading_model {
             loading_model.update();
