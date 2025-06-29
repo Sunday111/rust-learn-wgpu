@@ -11,16 +11,21 @@ pub struct RenderContext {
 }
 
 impl RenderContext {
-    pub async fn new(w: winit::window::Window) -> Self {
+    pub async fn new(
+        w: winit::window::Window,
+        instance_descriptor: Option<wgpu::InstanceDescriptor>,
+    ) -> Self {
         // The instance is a handle to our GPU
         // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            #[cfg(not(target_arch = "wasm32"))]
-            backends: wgpu::Backends::PRIMARY,
-            #[cfg(target_arch = "wasm32")]
-            backends: wgpu::Backends::GL,
-            ..Default::default()
-        });
+        let instance =
+            wgpu::Instance::new(&instance_descriptor.unwrap_or(wgpu::InstanceDescriptor {
+                // #[cfg(not(target_arch = "wasm32"))]
+                backends: wgpu::Backends::PRIMARY,
+                // #[cfg(target_arch = "wasm32")]
+                // backends: wgpu::Backends::BROWSER_WEBGPU,
+                // backends: wgpu::Backends::GL,
+                ..Default::default()
+            }));
 
         // SAFETY: `boxed` is pinned, so we can safely create a reference to `window`
         let window_box = Box::pin(w);
@@ -92,6 +97,8 @@ impl RenderContext {
             .copied()
             .find(|f| f.is_srgb())
             .unwrap_or(surface_caps.formats[0]);
+
+        log::info!("surface format: {:?}", surface_format);
 
         let size = window.inner_size();
         let config = wgpu::SurfaceConfiguration {

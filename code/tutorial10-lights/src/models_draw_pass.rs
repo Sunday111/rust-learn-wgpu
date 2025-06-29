@@ -265,6 +265,7 @@ impl ModelsDrawPass {
 
         let models_pipeline = {
             let ctx = render_context.borrow();
+            let gamma_correction = !ctx.config.format.is_srgb();
             ModelsDrawPass::create_render_pipeline(
                 &ctx.device,
                 &camera_bind_group_layout,
@@ -272,6 +273,7 @@ impl ModelsDrawPass {
                 &light_bind_group_layout,
                 ctx.config.format,
                 depth_stencil_state,
+                gamma_correction,
             )
         };
 
@@ -478,11 +480,18 @@ impl ModelsDrawPass {
         light_bind_group_layout: &wgpu::BindGroupLayout,
         surface_format: wgpu::TextureFormat,
         depth_stencil_state: Option<wgpu::DepthStencilState>,
+        gamma_correction: bool,
     ) -> wgpu::RenderPipeline {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Model Shader"),
             source: wgpu::ShaderSource::Wgsl(tutorial_embedded_content::TUTORIAL_10_SHADER.into()),
         });
+
+        let mut constants: HashMap<String, f64> = HashMap::new();
+        constants.insert(
+            "enable_gamma_correction".into(),
+            if gamma_correction { 1.0 } else { 0.0 },
+        );
 
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Triangle Strip Render Pipeline"),
@@ -511,7 +520,10 @@ impl ModelsDrawPass {
                     blend: Some(wgpu::BlendState::REPLACE),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &constants,
+                    ..Default::default()
+                },
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,

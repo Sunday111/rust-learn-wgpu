@@ -30,7 +30,21 @@ fn vs_main(
 
 // Fragment shader
 
+override enable_gamma_correction: bool = false;
+
+fn linear_to_srgb(color: vec3<f32>) -> vec3<f32> {
+    let cutoff = vec3<f32>(0.0031308);
+    let lower = color * 12.92;
+    let higher = 1.055 * pow(color, vec3<f32>(1.0 / 2.4)) - 0.055;
+    return select(higher, lower, color <= cutoff);
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
-    return vec4<f32>(in.color, 1.0);
+    var color:vec3<f32> = in.color;
+
+    if enable_gamma_correction {
+        color = linear_to_srgb(color.rgb);
+    }
+    return vec4<f32>(color, 1.0);
 }

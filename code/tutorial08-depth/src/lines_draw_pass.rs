@@ -1,3 +1,5 @@
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
+
 use cgmath::Vector3;
 use wgpu::util::DeviceExt;
 
@@ -24,6 +26,8 @@ impl Vertex {
 }
 
 pub struct LinesDrawPass {
+    #[allow(dead_code)]
+    ctx: Rc<RefCell<klgl::RenderContext>>,
     pub pipeline: wgpu::RenderPipeline,
     pub vertex_buffer: wgpu::Buffer,
     pub num_lines: u32,
@@ -31,35 +35,50 @@ pub struct LinesDrawPass {
 
 impl LinesDrawPass {
     pub fn new(
-        device: &wgpu::Device,
+        ctx: Rc<RefCell<klgl::RenderContext>>,
         camera_bind_group_layout: &wgpu::BindGroupLayout,
-        surface_format: wgpu::TextureFormat,
         depth_stencil_state: Option<wgpu::DepthStencilState>,
     ) -> Self {
-        let (lines_vertex_buffer, num_lines) = Self::make_lines_buffer(device);
+        let (lines_vertex_buffer, num_lines) = Self::make_lines_buffer(&ctx.borrow().device);
+
+        let pipeline = {
+            let ctx = ctx.borrow();
+            let gamma_correction = !ctx.config.format.is_srgb();
+            Self::create_pipeline(
+                &ctx.device,
+                camera_bind_group_layout,
+                ctx.config.format,
+                depth_stencil_state,
+                gamma_correction,
+            )
+        };
 
         Self {
-            pipeline: Self::create_pipeline(
-                device,
-                camera_bind_group_layout,
-                surface_format,
-                depth_stencil_state,
-            ),
+            ctx,
+            pipeline,
             vertex_buffer: lines_vertex_buffer,
             num_lines,
         }
     }
 
-    pub fn create_pipeline(
+    fn create_pipeline(
         device: &wgpu::Device,
         camera_bind_group_layout: &wgpu::BindGroupLayout,
         texture_format: wgpu::TextureFormat,
         depth_stencil_state: Option<wgpu::DepthStencilState>,
+        gamma_correction: bool,
     ) -> wgpu::RenderPipeline {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Solid Color Shader"),
-            source: wgpu::ShaderSource::Wgsl(tutorial_embedded_content::COLORED_VERTICES_SHADER.into()),
+            source: wgpu::ShaderSource::Wgsl(
+                tutorial_embedded_content::COLORED_VERTICES_SHADER.into(),
+            ),
         });
+        let mut constants: HashMap<String, f64> = HashMap::new();
+        constants.insert(
+            "enable_gamma_correction".into(),
+            if gamma_correction { 1.0 } else { 0.0 },
+        );
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Lines Render Pipeline"),
             layout: Some(
@@ -92,7 +111,10 @@ impl LinesDrawPass {
                     blend: Some(wgpu::BlendState::REPLACE),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &constants,
+                    ..Default::default()
+                },
             }),
             depth_stencil: depth_stencil_state.clone(),
             multisample: wgpu::MultisampleState {

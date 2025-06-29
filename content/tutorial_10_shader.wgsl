@@ -42,6 +42,15 @@ var<uniform> camera: CameraUniform;
 @group(2) @binding(0)
 var<uniform> light: Light;
 
+override enable_gamma_correction: bool = true;
+
+fn linear_to_srgb(color: vec3<f32>) -> vec3<f32> {
+    let cutoff = vec3<f32>(0.0031308);
+    let lower = color * 12.92;
+    let higher = 1.055 * pow(color, vec3<f32>(1.0 / 2.4)) - 0.055;
+    return select(higher, lower, color <= cutoff);
+}
+
 @vertex
 fn vs_main(
     model: VertexInput, instance: InstanceInput,
@@ -84,7 +93,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let specular_strength = pow(max(dot(in.world_normal, half_dir), 0.0), 32.0);
     let specular_color = specular_strength * light.color;
 
-    let result = (ambient_color + diffuse_color + specular_color) * object_color.xyz;
+    let linear_color  = (ambient_color + diffuse_color + specular_color) * object_color.xyz;
+    var rgb: vec3<f32>;
+    if enable_gamma_correction {
+        rgb = linear_to_srgb(linear_color);
+    } else {
+        rgb = linear_color;
+    }
 
-    return vec4<f32>(result, object_color.a);
+    return vec4<f32>(rgb, object_color.a);
 }

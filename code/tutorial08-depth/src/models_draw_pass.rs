@@ -1,3 +1,5 @@
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
+
 use cgmath::{Deg, Transform};
 use klgl::Rotator;
 use wgpu::util::DeviceExt;
@@ -145,15 +147,13 @@ pub struct ModelsDrawPass {
 }
 
 impl ModelsDrawPass {
-    pub fn new(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+    pub async fn new(
+        render_context: Rc<RefCell<klgl::RenderContext>>,
         camera_bind_group_layout: &wgpu::BindGroupLayout,
-        surface_format: wgpu::TextureFormat,
         depth_stencil_state: Option<wgpu::DepthStencilState>,
     ) -> Self {
-        let texture_bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        let texture_bind_group_layout = render_context.borrow().device.create_bind_group_layout(
+            &wgpu::BindGroupLayoutDescriptor {
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
@@ -175,52 +175,71 @@ impl ModelsDrawPass {
                     },
                 ],
                 label: Some("model_draw_pass_texture_bind_group_layout"),
-            });
-
-        let models_pipeline = ModelsDrawPass::create_render_pipeline(
-            &device,
-            &camera_bind_group_layout,
-            &texture_bind_group_layout,
-            surface_format,
-            depth_stencil_state,
+            },
         );
 
-        let mut model_instances: Vec<Instance> = vec![];
-        Self::compute_model_instances(&mut model_instances, Deg(45.0));
+        let models_pipeline = {
+            let ctx = render_context.borrow();
+            let gamma_correction = !ctx.config.format.is_srgb();
+            ModelsDrawPass::create_render_pipeline(
+                &ctx.device,
+                &camera_bind_group_layout,
+                &texture_bind_group_layout,
+                ctx.config.format,
+                depth_stencil_state,
+                gamma_correction,
+            )
+        };
 
-        let model_instances_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Instance Buffer"),
-            contents: bytemuck::cast_slice(&model_instances),
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-        });
+        let mut instances: Vec<Instance> = vec![];
+        Self::compute_model_instances(&mut instances, Deg(45.0));
+
+        let model_instances_buffer =
+            render_context
+                .borrow()
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Instance Buffer"),
+                    contents: bytemuck::cast_slice(&instances),
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                });
 
         let mut tri_vert: [Vertex; 3] = TRIANGLE_VERTICES.into();
         transform_model(&mut tri_vert);
 
-        let model_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex Buffer"),
-            contents: bytemuck::cast_slice(&tri_vert),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+        let vertex_buffer =
+            render_context
+                .borrow()
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Vertex Buffer"),
+                    contents: bytemuck::cast_slice(&tri_vert),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
 
         let num_indices = TRIANGLE_INDICES.len();
-        let model_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Index Buffer"),
-            contents: bytemuck::cast_slice(TRIANGLE_INDICES),
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let index_buffer =
+            render_context
+                .borrow()
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Index Buffer"),
+                    contents: bytemuck::cast_slice(TRIANGLE_INDICES),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
 
         let textures = {
+            let ctx = render_context.borrow();
             [
                 {
                     let diffuse_texture = klgl::Texture::from_bytes(
-                        &device,
-                        &queue,
+                        &ctx.device,
+                        &ctx.queue,
                         tutorial_embedded_content::HAPPY_TREE_PNG,
                         "happy-tree.png",
                     )
                     .unwrap();
-                    device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
                         layout: &texture_bind_group_layout,
                         entries: &[
                             wgpu::BindGroupEntry {
@@ -237,14 +256,14 @@ impl ModelsDrawPass {
                 },
                 {
                     let diffuse_texture = klgl::Texture::from_bytes(
-                        &device,
-                        &queue,
+                        &ctx.device,
+                        &ctx.queue,
                         tutorial_embedded_content::ILLUMINATI_PNG,
                         "illuminati.png",
                     )
                     .unwrap();
 
-                    device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    ctx.device.create_bind_group(&wgpu::BindGroupDescriptor {
                         layout: &texture_bind_group_layout,
                         entries: &[
                             wgpu::BindGroupEntry {
@@ -264,9 +283,9 @@ impl ModelsDrawPass {
 
         Self {
             pipeline: models_pipeline,
-            vertex_buffer: model_vertex_buffer,
-            index_buffer: model_index_buffer,
-            instances: model_instances,
+            vertex_buffer,
+            index_buffer,
+            instances,
             instances_buffer: model_instances_buffer,
             num_indices: num_indices as u32,
             textures,
@@ -312,11 +331,18 @@ impl ModelsDrawPass {
         texture_bind_group_layout: &wgpu::BindGroupLayout,
         surface_format: wgpu::TextureFormat,
         depth_stencil_state: Option<wgpu::DepthStencilState>,
+        gamma_correction: bool,
     ) -> wgpu::RenderPipeline {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Model Shader"),
-            source: wgpu::ShaderSource::Wgsl(tutorial_embedded_content::TUTORIAL_7_SHADER.into()),
+            source: wgpu::ShaderSource::Wgsl(tutorial_embedded_content::TUTORIAL_8_SHADER.into()),
         });
+
+        let mut constants: HashMap<String, f64> = HashMap::new();
+        constants.insert(
+            "enable_gamma_correction".into(),
+            if gamma_correction { 1.0 } else { 0.0 },
+        );
 
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Triangle Strip Render Pipeline"),
@@ -341,7 +367,10 @@ impl ModelsDrawPass {
                     blend: Some(wgpu::BlendState::REPLACE),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &constants,
+                    ..Default::default()
+                },
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleStrip,

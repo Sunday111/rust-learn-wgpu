@@ -2938,6 +2938,7 @@ dependencies = [
  "log",
  "pollster",
  "tutorial-embedded-content",
+ "wasm-bindgen-futures",
  "web-sys",
  "web-time",
  "wgpu",

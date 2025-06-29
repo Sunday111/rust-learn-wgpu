@@ -1,4 +1,6 @@
+#[cfg(not(target_arch = "wasm32"))]
 use pollster::FutureExt;
+
 use wgpu::util::DeviceExt;
 use winit::{
     application::ApplicationHandler,
@@ -40,25 +42,34 @@ struct Renderer {
 }
 
 pub struct App {
-    renderer: Option<Renderer>,
+    renderer: Rc<RefCell<Option<Renderer>>>,
 }
 
 impl App {
     pub async fn new() -> Self {
-        Self { renderer: None }
+        Self {
+            renderer: Rc::new(RefCell::new(None)),
+        }
     }
 }
 
 impl<'a> ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let renderer = Renderer::new(
-            event_loop
-                .create_window(Window::default_attributes())
-                .unwrap(),
-        )
-        .block_on();
-
-        self.renderer = Some(renderer);
+        let window = event_loop
+            .create_window(Window::default_attributes())
+            .unwrap();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.renderer = Rc::new(RefCell::new(Some(Renderer::new(window).block_on())));
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let renderer_container = Rc::clone(&self.renderer); // or global state
+            wasm_bindgen_futures::spawn_local(async move {
+                let renderer = Renderer::new(window).await;
+                renderer_container.borrow_mut().replace(renderer);
+            });
+        }
     }
 
     fn window_event(
@@ -67,16 +78,15 @@ impl<'a> ApplicationHandler for App {
         window_id: WindowId,
         event: WindowEvent,
     ) {
-        match &mut self.renderer {
-            Some(s) => s.window_event(event_loop, window_id, event),
-            _ => {}
+        if let Some(renderer) = self.renderer.borrow_mut().as_mut() {
+            renderer.window_event(event_loop, window_id, event);
         }
     }
 }
 
 impl Renderer {
     async fn new(w: Window) -> Self {
-        let render_context = Rc::new(RefCell::new(klgl::RenderContext::new(w).await));
+        let render_context = Rc::new(RefCell::new(klgl::RenderContext::new(w, None).await));
 
         let size = render_context.borrow().window.inner_size();
         let depth_texture = klgl::Texture::create_depth_texture(
