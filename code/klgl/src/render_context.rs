@@ -18,6 +18,10 @@ impl RenderContext {
         // The instance is a handle to our GPU
         // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
         let instance = wgpu::Instance::new(&instance_descriptor.unwrap_or_default());
+        // let instance = wgpu::Instance::new(&instance_descriptor.unwrap_or(InstanceDescriptor {
+        //     backends: wgpu::Backends::PRIMARY,
+        //     ..Default::default()
+        // }));
         // SAFETY: `boxed` is pinned, so we can safely create a reference to `window`
         let window_box = Box::pin(w);
         let window: &'static winit::window::Window =
