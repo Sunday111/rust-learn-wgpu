@@ -11,23 +11,48 @@ pub struct RenderContext {
 }
 
 impl RenderContext {
-    pub async fn new(
-        w: winit::window::Window,
-        instance_descriptor: Option<wgpu::InstanceDescriptor>,
-    ) -> Self {
-        // The instance is a handle to our GPU
-        // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
-        let instance = wgpu::Instance::new(&instance_descriptor.unwrap_or_default());
-        // let instance = wgpu::Instance::new(&instance_descriptor.unwrap_or(InstanceDescriptor {
-        //     backends: wgpu::Backends::PRIMARY,
-        //     ..Default::default()
-        // }));
-        // SAFETY: `boxed` is pinned, so we can safely create a reference to `window`
-        let window_box = Box::pin(w);
-        let window: &'static winit::window::Window =
-            unsafe { &*(Pin::as_ref(&window_box).get_ref() as *const _) };
+    pub async fn create_any(w: winit::window::Window) -> Self {
+        // Successfully created RenderContext takes window object
+        let mut window_box = Some(Box::pin(w));
 
-        let surface = instance.create_surface(window).unwrap();
+        let primary_result = Self::new(
+            &mut window_box,
+            wgpu::InstanceDescriptor {
+                backends: wgpu::Backends::PRIMARY,
+                ..Default::default()
+            },
+        )
+        .await;
+
+        match primary_result {
+            Ok(ctx) => ctx,
+            Err(err) => {
+                log::warn!("Failed to create primary backend (err: {:?})", err);
+                let secondary_result = Self::new(
+                    &mut window_box,
+                    wgpu::InstanceDescriptor {
+                        backends: wgpu::Backends::SECONDARY,
+                        ..Default::default()
+                    },
+                )
+                .await;
+
+                secondary_result.unwrap()
+            }
+        }
+    }
+
+    pub async fn new(
+        opt_box: &mut Option<Pin<Box<winit::window::Window>>>,
+        instance_descriptor: wgpu::InstanceDescriptor,
+    ) -> anyhow::Result<Self> {
+        // The instance is a handle to our GPU
+        let instance = wgpu::Instance::new(&instance_descriptor);
+        // SAFETY: `boxed` is pinned, so we can safely create a reference to `window`
+        let window: &'static winit::window::Window =
+            unsafe { &*(Pin::as_ref(&opt_box.as_mut().unwrap()).get_ref() as *const _) };
+
+        let surface = instance.create_surface(window)?;
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -36,7 +61,19 @@ impl RenderContext {
                 force_fallback_adapter: false,
             })
             .await
-            .unwrap();
+            .ok_or_else(|| anyhow::anyhow!("Failed to created adapter."))?;
+
+        let surface_caps = surface.get_capabilities(&adapter);
+        // Shader code in this tutorial assumes an Srgb surface texture. Using a different
+        // one will result all the colors comming out darker. If you want to support non
+        // Srgb surfaces, you'll need to account for that when drawing to the frame.
+        let surface_format = surface_caps
+            .formats
+            .iter()
+            .copied()
+            .find(|f| f.is_srgb())
+            .unwrap_or(surface_caps.formats[0]);
+        log::info!("surface format: {:?}", surface_format);
 
         let (device, queue) = adapter
             .request_device(
@@ -58,7 +95,7 @@ impl RenderContext {
                 None,
             )
             .await
-            .unwrap();
+            .map_err(|err| anyhow::anyhow!("Failed to request device. Error: {:?}", err))?;
 
         let device_limits = device.limits();
         log::info!("device limits: {:?}", device_limits);
@@ -82,19 +119,6 @@ impl RenderContext {
                 .expect("Couldn't append canvas to document body.");
         }
 
-        let surface_caps = surface.get_capabilities(&adapter);
-        // Shader code in this tutorial assumes an Srgb surface texture. Using a different
-        // one will result all the colors comming out darker. If you want to support non
-        // Srgb surfaces, you'll need to account for that when drawing to the frame.
-        let surface_format = surface_caps
-            .formats
-            .iter()
-            .copied()
-            .find(|f| f.is_srgb())
-            .unwrap_or(surface_caps.formats[0]);
-
-        log::info!("surface format: {:?}", surface_format);
-
         let size = window.inner_size();
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -107,15 +131,15 @@ impl RenderContext {
             view_formats: vec![],
         };
 
-        Self {
+        Ok(Self {
             instance,
-            window: window_box,
+            window: opt_box.take().unwrap(),
             surface,
             adapter,
             device,
             queue,
             config,
-        }
+        })
     }
 
     pub fn aspect(&self) -> f32 {

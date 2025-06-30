@@ -87,7 +87,7 @@ impl<'a> ApplicationHandler for App {
 
 impl Renderer {
     async fn new(w: Window) -> Self {
-        let render_context = Rc::new(RefCell::new(klgl::RenderContext::new(w, None).await));
+        let render_context = Rc::new(RefCell::new(klgl::RenderContext::create_any(w).await));
 
         let size = render_context.borrow().window.inner_size();
         let depth_texture = klgl::Texture::create_depth_texture(
