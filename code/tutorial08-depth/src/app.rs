@@ -84,18 +84,14 @@ impl ApplicationHandler for App {
 
 impl Renderer {
     async fn new(w: Window) -> Self {
-        let mut window_box = Some(Box::pin(w));
         let render_context = Rc::new(RefCell::new(
             klgl::RenderContext::new(
-                &mut window_box,
-                wgpu::InstanceDescriptor {
-                    #[cfg(not(target_arch = "wasm32"))]
-                    backends: wgpu::Backends::PRIMARY,
-                    #[cfg(target_arch = "wasm32")]
-                    // backends: wgpu::Backends::BROWSER_WEBGPU,
-                    backends: wgpu::Backends::GL,
-                    ..Default::default()
-                },
+                w,
+                #[cfg(not(target_arch = "wasm32"))]
+                wgpu::Backends::PRIMARY,
+                #[cfg(target_arch = "wasm32")]
+                // backends: wgpu::Backends::BROWSER_WEBGPU,
+                wgpu::Backends::GL,
             )
             .await
             .unwrap(),

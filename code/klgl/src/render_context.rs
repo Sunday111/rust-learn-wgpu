@@ -11,54 +11,48 @@ pub struct RenderContext {
 }
 
 impl RenderContext {
+    pub async fn test_backends(backends: wgpu::Backends) -> bool {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends,
+            ..Default::default()
+        });
+
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                compatible_surface: None,
+                ..Default::default()
+            })
+            .await;
+
+        adapter.is_some()
+    }
+
     pub async fn create_any(w: winit::window::Window) -> Self {
         // Successfully created RenderContext takes window object
-        let mut window_box = Some(Box::pin(w));
-
-        let primary_result = Self::new(
-            &mut window_box,
-            wgpu::InstanceDescriptor {
-                backends: wgpu::Backends::PRIMARY,
-                ..Default::default()
-            },
-        )
-        .await;
-
-        match primary_result {
-            Ok(ctx) => ctx,
-            Err(err) => {
-                log::warn!("Failed to create primary backend (err: {:?})", err);
-                let secondary_result = Self::new(
-                    &mut window_box,
-                    wgpu::InstanceDescriptor {
-                        backends: wgpu::Backends::SECONDARY,
-                        ..Default::default()
-                    },
-                )
-                .await;
-
-                secondary_result.unwrap()
-            }
+        if Self::test_backends(wgpu::Backends::PRIMARY).await {
+            Self::new(w, wgpu::Backends::PRIMARY).await.unwrap()
+        } else {
+            Self::new(w, wgpu::Backends::SECONDARY).await.unwrap()
         }
     }
 
-    pub async fn new(
-        opt_box: &mut Option<Pin<Box<winit::window::Window>>>,
-        instance_descriptor: wgpu::InstanceDescriptor,
-    ) -> anyhow::Result<Self> {
+    pub async fn new(w: winit::window::Window, backends: wgpu::Backends) -> anyhow::Result<Self> {
         // The instance is a handle to our GPU
-        let instance = wgpu::Instance::new(&instance_descriptor);
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends,
+            ..Default::default()
+        });
         // SAFETY: `boxed` is pinned, so we can safely create a reference to `window`
+        let window_box = Box::pin(w);
         let window: &'static winit::window::Window =
-            unsafe { &*(Pin::as_ref(&opt_box.as_mut().unwrap()).get_ref() as *const _) };
+            unsafe { &*(Pin::as_ref(&window_box).get_ref() as *const _) };
 
         let surface = instance.create_surface(window)?;
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::default(),
                 compatible_surface: Some(&surface),
-                force_fallback_adapter: false,
+                ..Default::default()
             })
             .await
             .ok_or_else(|| anyhow::anyhow!("Failed to created adapter."))?;
@@ -133,7 +127,7 @@ impl RenderContext {
 
         Ok(Self {
             instance,
-            window: opt_box.take().unwrap(),
+            window: window_box,
             surface,
             adapter,
             device,
