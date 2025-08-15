@@ -124,11 +124,11 @@ impl Renderer {
         let camera = Camera::new(
             // position the camera 1 unit up and 2 units back
             // +z is out of the screen
-            (5.41923, 0.19568399, 6.468395).into(),
+            (5.3781886, -2.8067138, 5.055744).into(),
             // have it look at the origin
             Rotator {
-                yaw: Deg(81.0),
-                pitch: Deg(56.0),
+                yaw: Deg(138.0),
+                pitch: Deg(36.4),
                 roll: Deg(0.0),
             },
             render_context.borrow().aspect(),
@@ -287,13 +287,13 @@ impl Renderer {
             } => {
                 if button == MouseButton::Left && state == ElementState::Pressed {
                     self.models_draw_pass
-                        .swap_model(&self.render_context.borrow().device);
+                        .toggle_depth(&self.render_context.borrow().device);
                 }
             }
             WindowEvent::Touch(touch) => {
                 if touch.phase == TouchPhase::Started {
                     self.models_draw_pass
-                        .swap_model(&self.render_context.borrow().device);
+                        .toggle_depth(&self.render_context.borrow().device);
                 }
             }
             _ => {}
@@ -339,23 +339,12 @@ impl Renderer {
             );
         }
 
-        let dur_since_start = now.duration_since(self.start_time);
-        self.models_draw_pass.set_active_texture(
-            (((dur_since_start.as_secs_f64() / 3.0) as u32)
-                % (self.models_draw_pass.textures.len() as u32)) as u32,
-        );
-
         self.camera_controller.update_camera(&mut self.camera);
         self.camera_uniform.update_view_proj(&self.camera);
         self.render_context.borrow().queue.write_buffer(
             &self.camera_buffer,
             0,
             bytemuck::cast_slice(&[self.camera_uniform]),
-        );
-
-        self.models_draw_pass.update_model_instances(
-            &self.render_context.borrow().queue,
-            Deg(90.0 + 80.0 * (dur_since_start.as_secs_f32() * 2.0).sin()),
         );
     }
 
