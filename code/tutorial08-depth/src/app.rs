@@ -18,7 +18,6 @@ use web_time::Instant;
 struct Renderer {
     render_context: Rc<RefCell<klgl::RenderContext>>,
 
-    start_time: Instant,
     clear_color: wgpu::Color,
     surface_configured: bool,
     frame_counter: klgl::FpsCounter,
@@ -188,7 +187,6 @@ impl Renderer {
 
         Self {
             render_context,
-            start_time: Instant::now(),
             depth_texture,
             clear_color: wgpu::Color::BLACK,
             surface_configured: false,
