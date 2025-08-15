@@ -1,11 +1,13 @@
 from pathlib import Path
 import subprocess
 import shutil
+import os
 
 ROOT_DIR = Path(__file__).parent.resolve()
 WASM_BUILD_ROOT = ROOT_DIR / "wasm-build"
 
 def build_wasm_target(src_path:Path, out_dir:Path):
+    env = os.environ.copy()
     subprocess.check_call(
         [
             "wasm-pack",

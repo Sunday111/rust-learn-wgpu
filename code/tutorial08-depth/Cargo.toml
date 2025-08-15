@@ -20,6 +20,9 @@ web-time = "1.1"
 bytemuck = "1.22"
 anyhow = "1.0"
 cgmath = "0.18"
+imgui-wgpu = "0.25"
+imgui = "0.12"
+imgui-winit-support = "0.13"
 
 [dependencies.klgl]
 path = "../klgl"

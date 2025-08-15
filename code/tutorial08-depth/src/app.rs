@@ -7,16 +7,21 @@ use winit::{
     window::{Window, WindowId},
 };
 
+use imgui;
+use imgui_wgpu;
+use imgui_winit_support;
+
 use crate::models_draw_pass::ModelsDrawPass;
 use crate::{display_depth_draw_pass::DisplayDepthDrawPass, lines_draw_pass::LinesDrawPass};
-use klgl::{Camera, CameraController, CameraUniform, Rotator};
+use klgl::{Camera, CameraController, CameraUniform, RenderContext, Rotator};
 
 use cgmath::Deg;
-use std::{cell::RefCell, iter, rc::Rc};
+use std::{cell::RefCell, iter, ops::DerefMut, rc::Rc};
 use web_time::Instant;
 
 struct Renderer {
     render_context: Rc<RefCell<klgl::RenderContext>>,
+    imgui: Option<ImguiState>,
 
     clear_color: wgpu::Color,
     surface_configured: bool,
@@ -35,6 +40,15 @@ struct Renderer {
     camera_controller: CameraController,
 
     show_depth: bool,
+}
+
+struct ImguiState {
+    context: imgui::Context,
+    platform: imgui_winit_support::WinitPlatform,
+    renderer: imgui_wgpu::Renderer,
+    demo_open: bool,
+    last_frame: Instant,
+    last_cursor: Option<imgui::MouseCursor>,
 }
 
 pub struct App {
@@ -77,6 +91,28 @@ impl ApplicationHandler for App {
     ) {
         if let Some(renderer) = self.renderer.borrow_mut().as_mut() {
             renderer.window_event(event_loop, window_id, event);
+        }
+    }
+
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: ()) {
+        if let Some(r) = self.renderer.borrow_mut().deref_mut() {
+            r.user_event(_event_loop, event);
+        }
+    }
+
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        device_id: winit::event::DeviceId,
+        event: winit::event::DeviceEvent,
+    ) {
+        if let Some(r) = self.renderer.borrow_mut().deref_mut() {
+            let imgui = r.imgui.as_mut().unwrap();
+            imgui.platform.handle_event::<()>(
+                imgui.context.io_mut(),
+                &r.render_context.borrow_mut().window,
+                &Event::DeviceEvent { device_id, event },
+            );
         }
     }
 }
@@ -185,8 +221,11 @@ impl Renderer {
             depth_stencil_state,
         );
 
+        let imgui = Self::setup_imgui(&render_context.borrow_mut());
+
         Self {
             render_context,
+            imgui,
             depth_texture,
             clear_color: wgpu::Color::BLACK,
             surface_configured: false,
@@ -204,13 +243,69 @@ impl Renderer {
         }
     }
 
+    pub fn setup_imgui(render_context: &RenderContext) -> Option<ImguiState> {
+        let mut imgui_ctx = imgui::Context::create();
+        let mut platform = imgui_winit_support::WinitPlatform::new(&mut imgui_ctx);
+
+        platform.attach_window(
+            imgui_ctx.io_mut(),
+            &render_context.window,
+            imgui_winit_support::HiDpiMode::Default,
+        );
+
+        imgui_ctx.set_ini_filename(None);
+
+        let hidpi_factor = render_context.window.scale_factor();
+        let font_size = (13.0 * hidpi_factor) as f32;
+        imgui_ctx.io_mut().font_global_scale = (1.0 / hidpi_factor) as f32;
+
+        imgui_ctx
+            .fonts()
+            .add_font(&[imgui::FontSource::DefaultFontData {
+                config: Some(imgui::FontConfig {
+                    oversample_h: 1,
+                    pixel_snap_h: true,
+                    size_pixels: font_size,
+                    ..Default::default()
+                }),
+            }]);
+
+        let renderer_config = imgui_wgpu::RendererConfig {
+            texture_format: render_context.config.format,
+            ..Default::default()
+        };
+
+        let renderer = imgui_wgpu::Renderer::new(
+            &mut imgui_ctx,
+            &render_context.device,
+            &render_context.queue,
+            renderer_config,
+        );
+        let last_frame = Instant::now();
+        let last_cursor = None;
+
+        return Some(ImguiState {
+            context: imgui_ctx,
+            platform,
+            renderer,
+            demo_open: false,
+            last_frame,
+            last_cursor,
+        });
+    }
+
     #[allow(unused_variables)]
-    fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
+    fn window_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        window_id: WindowId,
+        event: WindowEvent,
+    ) {
         if self.camera_controller.process_events(&event) {
             return;
         }
 
-        match event {
+        match event.clone() {
             WindowEvent::CloseRequested
             | WindowEvent::KeyboardInput {
                 event:
@@ -294,6 +389,13 @@ impl Renderer {
             }
             _ => {}
         }
+
+        let imgui = self.imgui.as_mut().unwrap();
+        imgui.platform.handle_event::<()>(
+            imgui.context.io_mut(),
+            &self.render_context.borrow().window,
+            &Event::WindowEvent { window_id, event },
+        );
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -438,7 +540,98 @@ impl Renderer {
             .borrow()
             .queue
             .submit(iter::once(encoder.finish()));
+
+        {
+            let render_context = self.render_context.borrow_mut();
+            let imgui = self.imgui.as_mut().unwrap();
+            let delta_s = imgui.last_frame.elapsed();
+            let now = Instant::now();
+            imgui
+                .context
+                .io_mut()
+                .update_delta_time(now - imgui.last_frame);
+            imgui.last_frame = now;
+            let ui = imgui.context.frame();
+
+            {
+                let window = ui.window("Hello world");
+                window
+                    .size([300.0, 100.0], imgui::Condition::FirstUseEver)
+                    .build(|| {
+                        ui.text("Hello world!");
+                        ui.text("This...is...imgui-rs on WGPU!");
+                        ui.separator();
+                        let mouse_pos = ui.io().mouse_pos;
+                        ui.text(format!(
+                            "Mouse Position: ({:.1},{:.1})",
+                            mouse_pos[0], mouse_pos[1]
+                        ));
+                    });
+
+                let window = ui.window("Hello too");
+                window
+                    .size([400.0, 200.0], imgui::Condition::FirstUseEver)
+                    .position([400.0, 200.0], imgui::Condition::FirstUseEver)
+                    .build(|| {
+                        ui.text(format!("Frametime: {delta_s:?}"));
+                    });
+
+                ui.show_demo_window(&mut imgui.demo_open);
+            }
+
+            let mut encoder: wgpu::CommandEncoder = render_context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
+            if imgui.last_cursor != ui.mouse_cursor() {
+                imgui.last_cursor = ui.mouse_cursor();
+                imgui.platform.prepare_render(ui, &render_context.window);
+            }
+
+            let view = output
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor::default());
+            let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+            imgui
+                .renderer
+                .render(
+                    imgui.context.render(),
+                    &render_context.queue,
+                    &render_context.device,
+                    &mut rpass,
+                )
+                .expect("Rendering failed");
+
+            drop(rpass);
+
+            render_context.queue.submit(Some(encoder.finish()));
+        }
+
         output.present();
         Ok(())
+    }
+
+    pub fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: ()) {
+        let window = self.render_context.borrow_mut();
+        let imgui = self.imgui.as_mut().unwrap();
+        imgui.platform.handle_event::<()>(
+            imgui.context.io_mut(),
+            &window.window,
+            &Event::UserEvent(event),
+        );
     }
 }
