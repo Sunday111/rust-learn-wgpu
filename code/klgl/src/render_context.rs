@@ -24,7 +24,7 @@ impl RenderContext {
             })
             .await;
 
-        adapter.is_some()
+        adapter.is_ok()
     }
 
     pub async fn create_any(w: winit::window::Window) -> Self {
@@ -54,8 +54,7 @@ impl RenderContext {
                 compatible_surface: Some(&surface),
                 ..Default::default()
             })
-            .await
-            .ok_or_else(|| anyhow::anyhow!("Failed to created adapter."))?;
+            .await?;
 
         let surface_caps = surface.get_capabilities(&adapter);
         // Shader code in this tutorial assumes an Srgb surface texture. Using a different
@@ -70,24 +69,21 @@ impl RenderContext {
         log::info!("surface format: {:?}", surface_format);
 
         let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: None,
-                    required_features: wgpu::Features::empty(),
-                    // WebGL doesn't support all of wgpu's features, so if
-                    // we're building for the web we'll have to disable some.
-                    required_limits: if cfg!(target_arch = "wasm32") {
-                        let mut l = wgpu::Limits::downlevel_webgl2_defaults();
-                        l.max_texture_dimension_2d = 4096;
-                        l
-                    } else {
-                        wgpu::Limits::default()
-                    },
-                    memory_hints: Default::default(),
+            .request_device(&wgpu::DeviceDescriptor {
+                label: None,
+                required_features: wgpu::Features::empty(),
+                // WebGL doesn't support all of wgpu's features, so if
+                // we're building for the web we'll have to disable some.
+                required_limits: if cfg!(target_arch = "wasm32") {
+                    let mut l = wgpu::Limits::downlevel_webgl2_defaults();
+                    l.max_texture_dimension_2d = 4096;
+                    l
+                } else {
+                    wgpu::Limits::default()
                 },
-                // Some(&std::path::Path::new("trace")), // Trace path
-                None,
-            )
+                memory_hints: Default::default(),
+                trace: wgpu::Trace::Off,
+            })
             .await
             .map_err(|err| anyhow::anyhow!("Failed to request device. Error: {:?}", err))?;
 

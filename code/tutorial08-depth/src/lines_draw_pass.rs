@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
 use cgmath::Vector3;
 use wgpu::util::DeviceExt;
@@ -74,11 +74,11 @@ impl LinesDrawPass {
                 tutorial_embedded_content::COLORED_VERTICES_SHADER.into(),
             ),
         });
-        let mut constants: HashMap<String, f64> = HashMap::new();
-        constants.insert(
-            "enable_gamma_correction".into(),
+        let constants = [(
+            "enable_gamma_correction" as &str,
             if gamma_correction { 1.0 } else { 0.0 },
-        );
+        )];
+
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Lines Render Pipeline"),
             layout: Some(

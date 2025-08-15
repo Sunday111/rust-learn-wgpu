@@ -487,11 +487,10 @@ impl ModelsDrawPass {
             source: wgpu::ShaderSource::Wgsl(tutorial_embedded_content::TUTORIAL_10_SHADER.into()),
         });
 
-        let mut constants: HashMap<String, f64> = HashMap::new();
-        constants.insert(
-            "enable_gamma_correction".into(),
+        let constants = [(
+            "enable_gamma_correction" as &str,
             if gamma_correction { 1.0 } else { 0.0 },
-        );
+        )];
 
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Triangle Strip Render Pipeline"),
