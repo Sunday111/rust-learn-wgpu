@@ -109,6 +109,8 @@ impl Instance {
 
 pub struct ModelsDrawPass {
     pub pipeline: wgpu::RenderPipeline,
+    pub pipeline_no_depth: wgpu::RenderPipeline,
+    pub enable_depth: bool,
     pub vertex_buffer: wgpu::Buffer,
     pub index_buffer: wgpu::Buffer,
     instances: Vec<Instance>,
@@ -122,15 +124,29 @@ impl ModelsDrawPass {
         camera_bind_group_layout: &wgpu::BindGroupLayout,
         depth_stencil_state: Option<wgpu::DepthStencilState>,
     ) -> Self {
-        let models_pipeline = {
+        let (pipeline, pipeline_no_depth) = {
             let ctx = render_context.borrow();
             let gamma_correction = !ctx.config.format.is_srgb();
-            ModelsDrawPass::create_render_pipeline(
-                &ctx.device,
-                &camera_bind_group_layout,
-                ctx.config.format,
-                depth_stencil_state,
-                gamma_correction,
+
+            (
+                ModelsDrawPass::create_render_pipeline(
+                    &ctx.device,
+                    &camera_bind_group_layout,
+                    ctx.config.format,
+                    depth_stencil_state.clone(),
+                    gamma_correction,
+                ),
+                ModelsDrawPass::create_render_pipeline(
+                    &ctx.device,
+                    &camera_bind_group_layout,
+                    ctx.config.format,
+                    depth_stencil_state.and_then(|x| {
+                        let mut r = x.clone();
+                        r.depth_compare = wgpu::CompareFunction::Always;
+                        Some(r)
+                    }),
+                    gamma_correction,
+                ),
             )
         };
 
@@ -171,7 +187,9 @@ impl ModelsDrawPass {
                 });
 
         Self {
-            pipeline: models_pipeline,
+            pipeline,
+            pipeline_no_depth,
+            enable_depth: true,
             vertex_buffer,
             index_buffer,
             instances,
@@ -283,10 +301,16 @@ impl ModelsDrawPass {
         })
     }
 
-    pub fn toggle_depth(&mut self, device: &wgpu::Device) {}
+    pub fn toggle_depth(&mut self) {
+        self.enable_depth = !self.enable_depth;
+    }
 
     pub fn render(&self, render_pass: &mut wgpu::RenderPass, camera_bind_group: &wgpu::BindGroup) {
-        render_pass.set_pipeline(&self.pipeline);
+        render_pass.set_pipeline(if self.enable_depth {
+            &self.pipeline
+        } else {
+            &self.pipeline_no_depth
+        });
         render_pass.set_bind_group(0, camera_bind_group, &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         render_pass.set_vertex_buffer(1, self.instances_buffer.slice(..));

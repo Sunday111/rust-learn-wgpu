@@ -286,14 +286,12 @@ impl Renderer {
                 button,
             } => {
                 if button == MouseButton::Left && state == ElementState::Pressed {
-                    self.models_draw_pass
-                        .toggle_depth(&self.render_context.borrow().device);
+                    self.models_draw_pass.toggle_depth();
                 }
             }
             WindowEvent::Touch(touch) => {
                 if touch.phase == TouchPhase::Started {
-                    self.models_draw_pass
-                        .toggle_depth(&self.render_context.borrow().device);
+                    self.models_draw_pass.toggle_depth();
                 }
             }
             _ => {}
