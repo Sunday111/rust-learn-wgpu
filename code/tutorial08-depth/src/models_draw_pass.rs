@@ -42,13 +42,12 @@ const TRIANGLE_VERTICES: [Vertex; 3] = [
 ];
 
 fn make_hollow_triangle() -> (Vec<Vertex>, Vec<u16>) {
-    // Intrude triange inside
     (
         TRIANGLE_VERTICES
             .iter()
             .copied()
             .chain(TRIANGLE_VERTICES.iter().map(|x| Vertex {
-                position: x.position.map(|x| x * 0.4),
+                position: x.position.map(|x| x * 0.3),
                 color: x.color,
             }))
             .collect(),
@@ -108,9 +107,8 @@ impl Instance {
 }
 
 pub struct ModelsDrawPass {
-    pub pipeline: wgpu::RenderPipeline,
-    pub pipeline_no_depth: wgpu::RenderPipeline,
-    pub enable_depth: bool,
+    pub pipelines: Vec<wgpu::RenderPipeline>,
+    pub pipeline_idx: u16,
     pub vertex_buffer: wgpu::Buffer,
     pub index_buffer: wgpu::Buffer,
     instances: Vec<Instance>,
@@ -124,30 +122,23 @@ impl ModelsDrawPass {
         camera_bind_group_layout: &wgpu::BindGroupLayout,
         depth_stencil_state: Option<wgpu::DepthStencilState>,
     ) -> Self {
-        let (pipeline, pipeline_no_depth) = {
+        let pipelines = {
             let ctx = render_context.borrow();
             let gamma_correction = !ctx.config.format.is_srgb();
-
-            (
-                ModelsDrawPass::create_render_pipeline(
-                    &ctx.device,
-                    &camera_bind_group_layout,
-                    ctx.config.format,
-                    depth_stencil_state.clone(),
-                    gamma_correction,
-                ),
-                ModelsDrawPass::create_render_pipeline(
-                    &ctx.device,
-                    &camera_bind_group_layout,
-                    ctx.config.format,
-                    depth_stencil_state.and_then(|x| {
-                        let mut r = x.clone();
-                        r.depth_compare = wgpu::CompareFunction::Always;
-                        Some(r)
-                    }),
-                    gamma_correction,
-                ),
-            )
+            let mut dss = depth_stencil_state.unwrap();
+            [wgpu::CompareFunction::Less, wgpu::CompareFunction::Always]
+                .iter()
+                .map(|f| {
+                    dss.depth_compare = *f;
+                    ModelsDrawPass::create_render_pipeline(
+                        &ctx.device,
+                        &camera_bind_group_layout,
+                        ctx.config.format,
+                        Some(dss.clone()),
+                        gamma_correction,
+                    )
+                })
+                .collect()
         };
 
         let mut instances: Vec<Instance> = vec![];
@@ -187,9 +178,8 @@ impl ModelsDrawPass {
                 });
 
         Self {
-            pipeline,
-            pipeline_no_depth,
-            enable_depth: true,
+            pipelines,
+            pipeline_idx: 0,
             vertex_buffer,
             index_buffer,
             instances,
@@ -302,15 +292,11 @@ impl ModelsDrawPass {
     }
 
     pub fn toggle_depth(&mut self) {
-        self.enable_depth = !self.enable_depth;
+        self.pipeline_idx = (self.pipeline_idx + 1) % self.pipelines.len() as u16;
     }
 
     pub fn render(&self, render_pass: &mut wgpu::RenderPass, camera_bind_group: &wgpu::BindGroup) {
-        render_pass.set_pipeline(if self.enable_depth {
-            &self.pipeline
-        } else {
-            &self.pipeline_no_depth
-        });
+        render_pass.set_pipeline(&self.pipelines[self.pipeline_idx as usize]);
         render_pass.set_bind_group(0, camera_bind_group, &[]);
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         render_pass.set_vertex_buffer(1, self.instances_buffer.slice(..));
